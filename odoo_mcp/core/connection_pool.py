@@ -126,42 +126,56 @@ class ConnectionPool:
         await self.close_all()
         logger.info("Connection pool stopped")
 
-    async def get_connection(self) -> ConnectionWrapper:
+    @asynccontextmanager
+    async def get_connection(self):
         """
         Get a connection from the pool or create a new one if needed.
 
-        Returns:
-            ConnectionWrapper: A connection wrapper
+        Yields:
+            BaseOdooHandler: A connection handler
 
         Raises:
             PoolTimeoutError: If no connection is available within the timeout
             NetworkError: If creating a new connection fails
         """
-        async with self._lock:
-            # Try to find an available connection
-            for conn in self.connections:
-                if not conn.in_use:
-                    conn.in_use = True
-                    logger.debug(f"Reusing existing connection from pool")
-                    return conn
+        wrapper = None
+        try:
+            async with self._lock:
+                # Try to find an available connection
+                for conn in self.connections:
+                    if not conn.in_use:
+                        conn.in_use = True
+                        wrapper = conn
+                        logger.debug(f"Reusing existing connection from pool")
+                        break
 
-            # If we haven't reached max size, create a new connection
-            if len(self.connections) < self.max_size:
-                try:
-                    logger.info(f"Creating new connection with config: {self.config}")
-                    handler = self.handler_factory(self.config.get("protocol", "xmlrpc"), self.config)
-                    conn = ConnectionWrapper(handler)
-                    self.connections.append(conn)
-                    conn.in_use = True
-                    logger.info(f"Created new connection, pool size now {len(self.connections)}")
-                    return conn
-                except Exception as e:
-                    logger.error(f"Error creating new connection: {e}")
-                    raise NetworkError(f"Failed to create new connection: {e}")
+                # If we haven't reached max size, create a new connection
+                if wrapper is None and len(self.connections) < self.max_size:
+                    try:
+                        logger.info(f"Creating new connection with config: {self.config}")
+                        handler = self.handler_factory(self.config.get("protocol", "xmlrpc"), self.config)
+                        wrapper = ConnectionWrapper(handler)
+                        self.connections.append(wrapper)
+                        wrapper.in_use = True
+                        logger.info(f"Created new connection, pool size now {len(self.connections)}")
+                    except Exception as e:
+                        logger.error(f"Error creating new connection: {e}")
+                        raise NetworkError(f"Failed to create new connection: {e}")
 
-            # If we're at max size, wait for a connection to become available
-            logger.warning("Connection pool at max size, waiting for available connection")
-            raise PoolTimeoutError("No connections available in pool")
+                # If we're at max size and no connection available, raise error
+                if wrapper is None:
+                    logger.warning("Connection pool at max size, no available connections")
+                    raise PoolTimeoutError("No connections available in pool")
+
+            # Yield the connection handler to the caller
+            yield wrapper.connection
+
+        finally:
+            # Always release the connection back to the pool
+            if wrapper is not None:
+                async with self._lock:
+                    wrapper.in_use = False
+                    wrapper.last_used = asyncio.get_event_loop().time()
 
     async def release_connection(self, connection: BaseOdooHandler):
         """
@@ -236,13 +250,10 @@ class ConnectionPool:
             NetworkError: If the execution fails
         """
         try:
-            connection = await self.get_connection()
-            try:
-                return await connection.connection.execute_kw(
+            async with self.get_connection() as connection:
+                return await connection.execute_kw(
                     model=model, method=method, args=args, kwargs=kwargs, uid=uid, password=password
                 )
-            finally:
-                await self.release_connection(connection.connection)
         except Exception as e:
             raise NetworkError(f"Failed to execute {method} on {model}: {str(e)}")
 

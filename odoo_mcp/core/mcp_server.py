@@ -45,8 +45,8 @@ from odoo_mcp.tools.orm_tools import ORMTools
 # Constants
 SERVER_NAME = "odoo-mcp-server"
 SERVER_VERSION = "2024.2.5"  # Using CalVer: YYYY.MM.DD
-PROTOCOL_VERSION = "2025-03-26"  # Current protocol version
-LEGACY_PROTOCOL_VERSIONS = ["2024-11-05"]  # Supported legacy versions
+PROTOCOL_VERSION = "2025-03-26"
+LEGACY_PROTOCOL_VERSIONS = ["2024-11-05"]
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +377,7 @@ class OdooMCPServer(Server):
         Args:
             config: The server configuration
         """
+
         super().__init__(SERVER_NAME, SERVER_VERSION)
         logger.info(f"Initializing OdooMCPServer with config: {config}")
         self.config = config.copy()  # Make a copy of the config to avoid modifying the original
@@ -420,6 +421,10 @@ class OdooMCPServer(Server):
         # Register tools and prompts
         self._register_tools_and_prompts()
 
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Get server capabilities."""
+        return self.capabilities_manager.get_capabilities()
 
     def _register_resource_handlers(self) -> None:
         """Register resource handlers."""
@@ -477,6 +482,35 @@ class OdooMCPServer(Server):
     def _register_tools_and_prompts(self) -> None:
         """Register tools and prompts."""
         logger.info("Registering tools and prompts...")
+        
+        def create_input_schema(parameters: Dict[str, Any]) -> Dict[str, Any]:
+            """Convert parameters dict to proper JSON Schema inputSchema format."""
+            properties = {}
+            required = []
+
+            for param_name, param_def in parameters.items():
+                # Skip 'optional' fields and other metadata
+                if param_name in ['optional', 'default']:
+                    continue
+
+                param_schema = {}
+                if 'type' in param_def:
+                    param_schema['type'] = param_def['type']
+                if 'description' in param_def:
+                    param_schema['description'] = param_def['description']
+                if 'items' in param_def:
+                    param_schema['items'] = param_def['items']
+                properties[param_name] = param_schema
+
+                # Add to required if not optional and no default
+                if not param_def.get('optional', False) and 'default' not in param_def:
+                    required.append(param_name)
+
+            return {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
 
         # Register resource templates
         logger.info("Registering resource templates...")
@@ -513,83 +547,47 @@ class OdooMCPServer(Server):
             self.capabilities_manager.register_resource(template)
             logger.info(f"Resource template {template.name} registered successfully")
 
-        # Register prompts
-        logger.info("Registering prompts...")
-        prompts = [
-            Prompt(
-                name="analyze-record",
-                description="Analyze an Odoo record",
-                template="Analyze the record {model}/{id}",
-                parameters={
-                    "model": {"type": "string", "description": "Model name"},
-                    "id": {"type": "integer", "description": "Record ID"},
-                },
-            ),
-            Prompt(
-                name="create-record",
-                description="Create a new Odoo record",
-                template="Create a new record in {model}",
-                parameters={
-                    "model": {"type": "string", "description": "Model name"},
-                    "values": {"type": "object", "description": "Record values"},
-                },
-            ),
-            Prompt(
-                name="update-record",
-                description="Update an Odoo record",
-                template="Update record {model}/{id}",
-                parameters={
-                    "model": {"type": "string", "description": "Model name"},
-                    "id": {"type": "integer", "description": "Record ID"},
-                    "values": {"type": "object", "description": "Record values"},
-                },
-            ),
-        ]
-
-        for prompt in prompts:
-            logger.info(f"Registering prompt: {prompt.name}")
-            self.capabilities_manager.register_prompt(prompt)
-            logger.info(f"Prompt {prompt.name} registered successfully")
-
         # Register ORM tools
         logger.info("Registering ORM tools...")
-        orm_tools = [
-            Tool(
-                name="odoo.schema.version",
-                description="Get the current schema version using global authentication",
-                operations=["read"],
-                parameters={}
-            ),
-            Tool(
-                name="odoo.schema.models",
-                description="List accessible models using global authentication",
-                operations=["read"],
-                parameters={
+        
+        # Define tool parameters
+        tool_definitions = [
+            {
+                "name": "odoo_schema_version",
+                "description": "Get the current schema version using global authentication",
+                "operations": ["read"],
+                "parameters": {}
+            },
+            {
+                "name": "odoo_schema_models",
+                "description": "List accessible models using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "with_access": {"type": "boolean", "description": "Whether to filter by access rights", "default": True}
                 }
-            ),
-            Tool(
-                name="odoo.schema.fields",
-                description="Get fields for a specific model using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_schema_fields",
+                "description": "Get fields for a specific model using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"}
                 }
-            ),
-            Tool(
-                name="odoo.domain.validate",
-                description="Validate and compile a domain expression using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_domain_validate",
+                "description": "Validate and compile a domain expression using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "domain_json": {"type": "object", "description": "Domain expression in JSON format"}
                 }
-            ),
-            Tool(
-                name="odoo.search_read",
-                description="Search and read records with security enhancements using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_search_read",
+                "description": "Search and read records with security enhancements using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "domain_json": {"type": "object", "description": "Search domain in JSON format", "optional": True},
                     "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True},
@@ -597,81 +595,92 @@ class OdooMCPServer(Server):
                     "offset": {"type": "integer", "description": "Number of records to skip", "default": 0},
                     "order": {"type": "string", "description": "Order specification", "optional": True}
                 }
-            ),
-            Tool(
-                name="odoo.name_search",
-                description="Search records by name with security using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_name_search",
+                "description": "Search records by name with security using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "name": {"type": "string", "description": "Name to search for"},
                     "operator": {"type": "string", "description": "Search operator", "default": "ilike"},
                     "limit": {"type": "integer", "description": "Maximum number of results", "default": 10}
                 }
-            ),
-            Tool(
-                name="odoo.read",
-                description="Read records with security using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_read",
+                "description": "Read records with security using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
                     "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True}
                 }
-            ),
-            Tool(
-                name="odoo.create",
-                description="Create a record with validation and security using global authentication",
-                operations=["create"],
-                parameters={
+            },
+            {
+                "name": "odoo_create",
+                "description": "Create a record with validation and security using global authentication",
+                "operations": ["create"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "values": {"type": "object", "description": "Record values"},
                     "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
                 }
-            ),
-            Tool(
-                name="odoo.write",
-                description="Write to records with validation and security using global authentication",
-                operations=["update"],
-                parameters={
+            },
+            {
+                "name": "odoo_write",
+                "description": "Write to records with validation and security using global authentication",
+                "operations": ["update"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
                     "values": {"type": "object", "description": "Values to write"},
                     "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
                 }
-            ),
-            Tool(
-                name="odoo.actions.next_steps",
-                description="Get next steps suggestions for a record using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_actions_next_steps",
+                "description": "Get next steps suggestions for a record using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "record_id": {"type": "integer", "description": "Record ID"}
                 }
-            ),
-            Tool(
-                name="odoo.actions.call",
-                description="Call an action method on a record using global authentication",
-                operations=["update"],
-                parameters={
+            },
+            {
+                "name": "odoo_actions_call",
+                "description": "Call an action method on a record using global authentication",
+                "operations": ["update"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "record_id": {"type": "integer", "description": "Record ID"},
                     "method": {"type": "string", "description": "Method name to call"},
                     "parameters": {"type": "object", "description": "Method parameters", "optional": True},
                     "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
                 }
-            ),
-            Tool(
-                name="odoo.picklists",
-                description="Get picklist values for a field using global authentication",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_picklists",
+                "description": "Get picklist values for a field using global authentication",
+                "operations": ["read"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
                     "field": {"type": "string", "description": "Field name"},
                     "limit": {"type": "integer", "description": "Maximum number of values", "default": 100}
                 }
-            )
+            }
         ]
+
+        # Create Tool objects with proper inputSchema
+        orm_tools = []
+        for tool_def in tool_definitions:
+            orm_tools.append(Tool(
+                name=tool_def["name"],
+                description=tool_def["description"],
+                operations=tool_def["operations"],
+                parameters=tool_def["parameters"],
+                inputSchema=create_input_schema(tool_def["parameters"])
+            ))
 
         for tool in orm_tools:
             logger.info(f"Registering ORM tool: {tool.name}")
@@ -849,222 +858,8 @@ class OdooMCPServer(Server):
                 raise
             raise ProtocolError(f"Error handling Odoo binary field request: {str(e)}")
 
-    async def _notify_resource_update(self, uri: str, resource: Resource) -> None:
-        """Notify about resource updates."""
-        try:
-            # Notify through bus handler
-            await self.bus_handler.notify_resource_update(uri, resource)
-
-            # Update cache
-            self.resource_manager._resource_cache[uri] = resource
-
-            # Notify subscribers
-            await self.resource_manager._notify_subscribers(uri, resource)
-
-            logger.info(f"Resource update notification sent for {uri}")
-        except Exception as e:
-            logger.error(f"Error notifying resource update for {uri}: {e}")
-            raise ProtocolError(f"Error notifying resource update: {str(e)}")
-
-    @property
-    def capabilities(self) -> Dict[str, Any]:
-        """Get server capabilities."""
-        return self.capabilities_manager.get_capabilities()
-
-    async def initialize(self, client_info: ClientInfo) -> ServerInfo:
-        """Initialize the server with client information."""
-        # Get the client's requested protocol version
-        client_version = client_info.protocol_version
-
-        # Validate protocol version
-        if client_version != PROTOCOL_VERSION and client_version not in LEGACY_PROTOCOL_VERSIONS:
-            raise ProtocolError(
-                f"Unsupported protocol version: {client_version}. "
-                f"Supported versions: {PROTOCOL_VERSION} and {', '.join(LEGACY_PROTOCOL_VERSIONS)}"
-            )
-
-        # Create server info
-        return ServerInfo(name=SERVER_NAME, version=SERVER_VERSION, capabilities=self.capabilities)
-
-    async def get_resource(self, uri: str) -> Resource:
-        """Get a resource by URI."""
-        logger.info(f"Getting resource for URI: {uri}")
-        logger.info(f"Available handlers: {list(self.resource_manager._resource_handlers.keys())}")
-        return await self.resource_manager.get_resource(uri)
-
-    async def list_resources(self, template: Optional[ResourceTemplate] = None) -> List[Resource]:
-        """List available resources."""
-        try:
-            if template:
-                # List resources for a specific template
-                if template.uri_template == "odoo://{model}/{id}":
-                    # Get all models
-                    models = await self.pool.execute_kw(
-                        model="ir.model",
-                        method="search_read",
-                        args=[[], ["model", "name"]],
-                        kwargs={},
-                    )
-                    resources = []
-                    for model in models:
-                        # Get first record of each model
-                        records = await self.pool.execute_kw(
-                            model=model["model"],
-                            method="search_read",
-                            args=[[], ["id"]],
-                            kwargs={"limit": 1},
-                        )
-                        if records:
-                            uri = f"odoo://{model['model']}/{records[0]['id']}"
-                            resources.append(
-                                Resource(
-                                    uri=uri,
-                                    type="record",
-                                    content=records[0],
-                                    mime_type="application/json",
-                                    metadata={
-                                        "model": model["model"],
-                                        "name": model["name"],
-                                        "id": records[0]["id"],
-                                    },
-                                )
-                            )
-                    return resources
-
-                elif template.uri_template == "odoo://{model}/list":
-                    # Get all models
-                    models = await self.pool.execute_kw(
-                        model="ir.model",
-                        method="search_read",
-                        args=[[], ["model", "name"]],
-                        kwargs={},
-                    )
-                    resources = []
-                    for model in models:
-                        uri = f"odoo://{model['model']}/list"
-                        resources.append(
-                            Resource(
-                                uri=uri,
-                                type="list",
-                                content=[],
-                                mime_type="application/json",
-                                metadata={"model": model["model"], "name": model["name"]},
-                            )
-                        )
-                    return resources
-
-                elif template.uri_template == "odoo://{model}/binary/{field}/{id}":
-                    # Get all models with binary fields
-                    models = await self.pool.execute_kw(
-                        model="ir.model",
-                        method="search_read",
-                        args=[[], ["model", "name"]],
-                        kwargs={},
-                    )
-                    resources = []
-                    for model in models:
-                        # Get binary fields
-                        fields = await self.pool.execute_kw(
-                            model=model["model"], method="fields_get", args=[], kwargs={}
-                        )
-                        binary_fields = {name: info for name, info in fields.items() if info.get("type") == "binary"}
-                        if binary_fields:
-                            # Get first record
-                            records = await self.pool.execute_kw(
-                                model=model["model"],
-                                method="search_read",
-                                args=[[], ["id"]],
-                                kwargs={"limit": 1},
-                            )
-                            if records:
-                                for field_name in binary_fields:
-                                    uri = f"odoo://{model['model']}/binary/" f"{field_name}/{records[0]['id']}"
-                                    resources.append(
-                                        Resource(
-                                            uri=uri,
-                                            type="binary",
-                                            content=None,
-                                            mime_type="application/octet-stream",
-                                            metadata={
-                                                "model": model["model"],
-                                                "name": model["name"],
-                                                "field": field_name,
-                                                "id": records[0]["id"],
-                                            },
-                                        )
-                                    )
-                    return resources
-
-                else:
-                    raise ProtocolError(f"Unsupported resource template: {template.uri_template}")
-
-            else:
-                # List all resource templates
-                templates = self.capabilities_manager.list_resource_templates()
-                return [
-                    Resource(
-                        uri=template["uriTemplate"],
-                        type=template["type"],
-                        content=None,
-                        mime_type="application/json",
-                        metadata={
-                            "name": template["name"],
-                            "description": template["description"],
-                            "operations": template["operations"],
-                            "parameters": template["parameters"],
-                        },
-                    )
-                    for template in templates
-                ]
-
-        except Exception as e:
-            if isinstance(e, ProtocolError):
-                raise
-            raise ProtocolError(f"Error listing resources: {str(e)}")
-
-    async def list_tools(self) -> List[Tool]:
-        """List available tools."""
-        return list(self.capabilities_manager.tools.values())
-
-    async def list_prompts(self) -> List[Prompt]:
-        """List available prompts."""
-        return list(self.capabilities_manager.prompts.values())
-
-    async def get_prompt(self, name: str, args: Dict[str, Any]) -> Any:
-        """Get a prompt by name."""
-        try:
-            # Find the prompt in capabilities
-            prompt = next((p for p in self.capabilities_manager._prompts if p.name == name), None)
-            if not prompt:
-                raise ProtocolError(f"Prompt not found: {name}")
-
-            # Validate arguments
-            for param_name, param_info in prompt.parameters.items():
-                if param_name not in args:
-                    raise ProtocolError(f"Missing required parameter: {param_name}")
-                # TODO: Add type validation if needed
-
-            # Execute prompt based on name
-            if name == "analyze-record":
-                return await self._handle_analyze_record_prompt(args)
-            elif name == "create-record":
-                return await self._handle_create_record_prompt(args)
-            elif name == "update-record":
-                return await self._handle_update_record_prompt(args)
-            elif name == "advanced-search":
-                return await self._handle_advanced_search_prompt(args)
-            elif name == "call-method":
-                return await self._handle_call_method_prompt(args)
-            else:
-                raise ProtocolError(f"Unsupported prompt: {name}")
-
-        except Exception as e:
-            if isinstance(e, ProtocolError):
-                raise
-            raise ProtocolError(f"Error executing prompt {name}: {str(e)}")
-
     async def _handle_analyze_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle analyze-record prompt."""
+        """Handle analyze_record prompt."""
         model = args["model"]
         record_id = args["id"]
 
@@ -1086,7 +881,7 @@ class OdooMCPServer(Server):
         }
 
     async def _handle_create_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle create-record prompt."""
+        """Handle create_record prompt."""
         model = args["model"]
         values = args["values"]
 
@@ -1109,7 +904,7 @@ class OdooMCPServer(Server):
         }
 
     async def _handle_update_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle update-record prompt."""
+        """Handle update_record prompt."""
         model = args["model"]
         record_id = args["id"]
         values = args["values"]
@@ -1133,7 +928,7 @@ class OdooMCPServer(Server):
         }
 
     async def _handle_advanced_search_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle advanced-search prompt."""
+        """Handle advanced_search prompt."""
         model = args["model"]
         domain = args.get("domain", [])
 
@@ -1301,19 +1096,209 @@ class OdooMCPServer(Server):
                 "error": {"code": -32603, "message": str(e)},
             }
 
-    async def run(self):
-        """Run the server."""
+    async def _handle_notification_initialized(self, request: JsonRpcRequest) -> Dict[str, Any]:
+        """Handle notification initialized request."""
         try:
-            logger.info("Starting server...")
-            if self.config.get("protocol") == "stdio":
-                logger.info("Starting server in stdio mode")
-                await self._run_stdio()
-            else:
-                logger.info("Starting server in streamable_http mode")
-                await self._run_http()
+            logger.info("Received notification initialized request")
+            return {"jsonrpc": "2.0", "result": {"status": "ok"}, "id": request.id}
         except Exception as e:
-            logger.error(f"Error running server: {e}")
-            raise
+            logger.error(f"Error handling notification initialized: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32603, "message": str(e)},
+                "id": request.id,
+            }
+
+    async def _handle_initialize(self, request: JsonRpcRequest) -> Dict[str, Any]:
+        """Handle initialize request."""
+        try:
+            client_info = ClientInfo.from_dict(request.params)
+            server_info = await self.initialize(client_info)
+
+            # Get the client's requested protocol version
+            client_version = request.params.get("protocolVersion", PROTOCOL_VERSION)
+            logger.debug(f"Client requested protocol version: {client_version}")
+
+            # Use client's version if it's a supported legacy version
+            response_version = client_version if client_version in LEGACY_PROTOCOL_VERSIONS else PROTOCOL_VERSION
+            logger.debug(f"Using protocol version in response: {response_version}")
+
+            # Create response directly
+            response = {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "result": {
+                    "protocolVersion": response_version,
+                    "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+                    "capabilities": server_info.capabilities,
+                },
+            }
+
+            logger.debug(f"Initializing client with protocol version: {response_version}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling initialize request: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": {"code": -32603, "message": str(e)},
+            }
+
+    async def _handle_list_resources(self, request: JsonRpcRequest) -> Dict[str, Any]:
+        """Handle list_resources request."""
+        try:
+            resources = await self.list_resources()
+            # Convert to MCP client format with text or blob
+            resources_list = []
+            for resource in resources:
+                if isinstance(resource.content, (dict, list)):
+                    # For dictionaries and lists, always use text with JSON
+                    content = {"text": json.dumps(resource.content), "blob": None}
+                elif isinstance(resource.content, bytes):
+                    # For binary content, encode as base64
+                    content = {"text": None, "blob": base64.b64encode(resource.content).decode()}
+                else:
+                    # For other types, convert to string
+                    content = {"text": str(resource.content), "blob": None}
+
+                # Extract model name from URI for the name field
+                uri_parts = resource.uri.replace("odoo://", "").split("/")
+                model_name = uri_parts[0] if uri_parts else "unknown"
+
+                resources_list.append(
+                    {
+                        "uri": resource.uri,
+                        "type": resource.type,
+                        "content": resource.content,
+                        "mimeType": resource.mime_type,
+                        "name": model_name,
+                        **content,
+                    }
+                )
+
+            return {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "result": {"id": "list", "method": "listResources", "resources": resources_list},
+            }
+        except Exception as e:
+            logger.error(f"Error handling list_resources request: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": {"code": -32603, "message": str(e)},
+            }
+
+    async def _handle_list_tools(self, request: JsonRpcRequest) -> Dict[str, Any]:
+        """Handle list_tools request."""
+        try:
+            tools = await self.list_tools()
+            return {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "result": {
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                            "inputSchema": tool.inputSchema or {"type": "object", "properties": {}, "required": []},
+                        }
+                        for tool in tools
+                    ]
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error handling list_tools request: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+            }
+
+    async def _handle_get_prompt(self, request: JsonRpcRequest) -> Dict[str, Any]:
+        """Handle get_prompt request."""
+        try:
+            prompt = await self.get_prompt(request.params["name"], request.params.get("args", {}))
+            # Convert ProtocolHandler response to dict
+            response = self.protocol_handler.create_response(request.id, result=prompt)
+            response = response.model_dump() if hasattr(response, "model_dump") else dict(response)
+            if "error" in response and (response["error"] is None or response["error"] == {}):
+                del response["error"]
+            return response
+        except Exception as e:
+            logger.error(f"Error handling get_prompt request: {e}")
+            error_response = self.protocol_handler.handle_protocol_error(e)
+            error_response = (
+                error_response.model_dump() if hasattr(error_response, "model_dump") else dict(error_response)
+            )
+            if "error" in error_response and (error_response["error"] is None or error_response["error"] == {}):
+                del error_response["error"]
+            return error_response
+
+    async def _handle_request(self, request: Union[web.Request, Dict[str, Any]]) -> Union[web.Response, Dict[str, Any]]:
+        """Handle incoming requests."""
+        try:
+            if isinstance(request, web.Request):
+                # Handle HTTP request
+                data = await request.json()
+                logger.debug("Received HTTP request data")
+                response = await self.process_request(data)
+                logger.debug(f"Got response from process_request: {response}")
+                logger.debug(f"Response type: {type(response)}")
+                logger.debug(f"Response attributes: {dir(response)}")
+                try:
+                    # Build JSON-RPC response dict with only 'result' OR 'error'
+                    response_dict = {
+                        "jsonrpc": getattr(response, "jsonrpc", "2.0"),
+                        "id": getattr(response, "id", None),
+                    }
+                    error = getattr(response, "error", None)
+                    if error is not None:
+                        response_dict["error"] = error
+                    else:
+                        response_dict["result"] = getattr(response, "result", None)
+                    logger.debug(f"Converted response dict: {response_dict}")
+                    return web.json_response(response_dict)
+                except Exception as e:
+                    logger.error(f"Error converting response to dict: {e}")
+                    logger.exception("Full traceback for conversion error:")
+                    return web.json_response(
+                        {"error": f"Error converting response: {str(e)}", "status": "error"},
+                        status=500,
+                    )
+            else:
+                # Handle stdio request
+                logger.debug("Received stdio request")
+                response = await self.process_request(request)
+                logger.debug(f"Got response from process_request: {response}")
+                logger.debug(f"Response type: {type(response)}")
+                logger.debug(f"Response attributes: {dir(response)}")
+                try:
+                    # Build JSON-RPC response dict with only 'result' OR 'error'
+                    response_dict = {
+                        "jsonrpc": getattr(response, "jsonrpc", "2.0"),
+                        "id": getattr(response, "id", None),
+                    }
+                    error = getattr(response, "error", None)
+                    if error is not None:
+                        response_dict["error"] = error
+                    else:
+                        response_dict["result"] = getattr(response, "result", None)
+                    logger.debug(f"Converted response dict: {response_dict}")
+                    return response_dict
+                except Exception as e:
+                    logger.error(f"Error converting response to dict: {e}")
+                    logger.exception("Full traceback for conversion error:")
+                    return {"error": f"Error converting response: {str(e)}", "status": "error"}
+        except Exception as e:
+            logger.error(f"Error handling request: {e}")
+            logger.exception("Full traceback for request handling error:")
+            if isinstance(request, web.Request):
+                return web.json_response({"error": str(e), "status": "error"}, status=500)
+            else:
+                return {"error": str(e), "status": "error"}
 
     async def _run_http(self):
         """Run the server in HTTP mode."""
@@ -1551,47 +1536,11 @@ class OdooMCPServer(Server):
             logger.error(f"Error in stdio server: {e}")
             raise
 
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a JSON-RPC request."""
-        try:
-            # Check if this is a custom tool format (array with tool objects)
-            if isinstance(request, list) and len(request) > 0:
-                # Handle custom tool format
-                tool_request = request[0]
-                if isinstance(tool_request, dict) and "tool" in tool_request:
-                    # Convert to standard format
-                    tool_name = tool_request["tool"]
-                    tool_params = tool_request.get("params", {})
-
-                    # Create a standard JSON-RPC request
-                    standard_request = {
-                        "jsonrpc": "2.0",
-                        "method": "call_tool",
-                        "params": {"name": tool_name, "arguments": tool_params},
-                        "id": None,
-                    }
-
-                    # Process as standard request
-                    return await self._process_standard_request(standard_request)
-
-            # Process as standard JSON-RPC request
-            return await self._process_standard_request(request)
-
-        except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
-            return {
-                "jsonrpc": "2.0",
-                "error": {"code": -32603, "message": str(e)},
-                "id": request.get("id") if isinstance(request, dict) else None,
-            }
-
     async def _process_standard_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a standard JSON-RPC request."""
         try:
-            # Parse request
             jsonrpc_request = JsonRpcRequest.from_dict(request)
-            # PATCH: alias per compatibilità n8n
-            method_aliases = {
+            method_aliases = {  # aliases for n8n compatibility
                 "tools/list": "list_tools",
                 "prompts/list": "list_prompts",
                 "resources/templates/list": "list_resource_templates",
@@ -1750,7 +1699,7 @@ class OdooMCPServer(Server):
                         "id": jsonrpc_request.id,
                     }
                 # ORM Tools handlers
-                elif tool_name == "odoo.schema.version":
+                elif tool_name == "odoo_schema_version":
                     result = await self.orm_tools.schema_version()
                     content = [{"type": "text", "text": json.dumps(result, default=str)}]
                     return {
@@ -1758,7 +1707,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.schema.models":
+                elif tool_name == "odoo_schema_models":
                     with_access = tool_args.get("with_access", True)
                     result = await self.orm_tools.schema_models(with_access)
                     content = [{"type": "text", "text": json.dumps(result, default=str)}]
@@ -1767,7 +1716,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.schema.fields":
+                elif tool_name == "odoo_schema_fields":
                     model = tool_args.get("model")
                     result = await self.orm_tools.schema_fields(model)
                     content = [{"type": "text", "text": json.dumps(result, default=str)}]
@@ -1776,7 +1725,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.domain.validate":
+                elif tool_name == "odoo_domain_validate":
                     model = tool_args.get("model")
                     domain_json = tool_args.get("domain_json")
                     result = await self.orm_tools.domain_validate(model, domain_json)
@@ -1786,7 +1735,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.search_read":
+                elif tool_name == "odoo_search_read":
                     model = tool_args.get("model")
                     domain_json = tool_args.get("domain_json")
                     fields = tool_args.get("fields")
@@ -1800,7 +1749,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.name_search":
+                elif tool_name == "odoo_name_search":
                     model = tool_args.get("model")
                     name = tool_args.get("name")
                     operator = tool_args.get("operator", "ilike")
@@ -1812,7 +1761,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.read":
+                elif tool_name == "odoo_read":
                     model = tool_args.get("model")
                     record_ids = tool_args.get("record_ids")
                     fields = tool_args.get("fields")
@@ -1823,7 +1772,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.create":
+                elif tool_name == "odoo_create":
                     model = tool_args.get("model")
                     values = tool_args.get("values")
                     operation_id = tool_args.get("operation_id")
@@ -1834,7 +1783,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.write":
+                elif tool_name == "odoo_write":
                     model = tool_args.get("model")
                     record_ids = tool_args.get("record_ids")
                     values = tool_args.get("values")
@@ -1846,7 +1795,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.actions.next_steps":
+                elif tool_name == "odoo_actions_next_steps":
                     model = tool_args.get("model")
                     record_id = tool_args.get("record_id")
                     result = await self.orm_tools.actions_next_steps(model, record_id)
@@ -1856,7 +1805,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.actions.call":
+                elif tool_name == "odoo_actions_call":
                     model = tool_args.get("model")
                     record_id = tool_args.get("record_id")
                     method = tool_args.get("method")
@@ -1869,7 +1818,7 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo.picklists":
+                elif tool_name == "odoo_picklists":
                     model = tool_args.get("model")
                     field = tool_args.get("field")
                     limit = tool_args.get("limit", 100)
@@ -2295,146 +2244,262 @@ class OdooMCPServer(Server):
                 "id": request.get("id"),
             }
 
-    async def _handle_notification_initialized(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle notification initialized request."""
+    async def _notify_resource_update(self, uri: str, resource: Resource) -> None:
+        """Notify about resource updates."""
         try:
-            logger.info("Received notification initialized request")
-            return {"jsonrpc": "2.0", "result": {"status": "ok"}, "id": request.id}
+            # Notify through bus handler
+            await self.bus_handler.notify_resource_update(uri, resource)
+
+            # Update cache
+            self.resource_manager._resource_cache[uri] = resource
+
+            # Notify subscribers
+            await self.resource_manager._notify_subscribers(uri, resource)
+
+            logger.info(f"Resource update notification sent for {uri}")
         except Exception as e:
-            logger.error(f"Error handling notification initialized: {e}")
-            return {
-                "jsonrpc": "2.0",
-                "error": {"code": -32603, "message": str(e)},
-                "id": request.id,
-            }
+            logger.error(f"Error notifying resource update for {uri}: {e}")
+            raise ProtocolError(f"Error notifying resource update: {str(e)}")
 
-    async def _handle_initialize(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle initialize request."""
+    async def get_resource(self, uri: str) -> Resource:
+        """Get a resource by URI."""
+        logger.info(f"Getting resource for URI: {uri}")
+        logger.info(f"Available handlers: {list(self.resource_manager._resource_handlers.keys())}")
+        return await self.resource_manager.get_resource(uri)
+
+    async def list_resources(self, template: Optional[ResourceTemplate] = None) -> List[Resource]:
+        """List available resources."""
         try:
-            client_info = ClientInfo.from_dict(request.params)
-            server_info = await self.initialize(client_info)
+            if template:
+                # List resources for a specific template
+                if template.uri_template == "odoo://{model}/{id}":
+                    # Get all models
+                    models = await self.pool.execute_kw(
+                        model="ir.model",
+                        method="search_read",
+                        args=[[], ["model", "name"]],
+                        kwargs={},
+                    )
+                    resources = []
+                    for model in models:
+                        # Get first record of each model
+                        records = await self.pool.execute_kw(
+                            model=model["model"],
+                            method="search_read",
+                            args=[[], ["id"]],
+                            kwargs={"limit": 1},
+                        )
+                        if records:
+                            uri = f"odoo://{model['model']}/{records[0]['id']}"
+                            resources.append(
+                                Resource(
+                                    uri=uri,
+                                    type="record",
+                                    content=records[0],
+                                    mime_type="application/json",
+                                    metadata={
+                                        "model": model["model"],
+                                        "name": model["name"],
+                                        "id": records[0]["id"],
+                                    },
+                                )
+                            )
+                    return resources
 
-            # Get the client's requested protocol version
-            client_version = request.params.get("protocolVersion", PROTOCOL_VERSION)
-            logger.debug(f"Client requested protocol version: {client_version}")
+                elif template.uri_template == "odoo://{model}/list":
+                    # Get all models
+                    models = await self.pool.execute_kw(
+                        model="ir.model",
+                        method="search_read",
+                        args=[[], ["model", "name"]],
+                        kwargs={},
+                    )
+                    resources = []
+                    for model in models:
+                        uri = f"odoo://{model['model']}/list"
+                        resources.append(
+                            Resource(
+                                uri=uri,
+                                type="list",
+                                content=[],
+                                mime_type="application/json",
+                                metadata={"model": model["model"], "name": model["name"]},
+                            )
+                        )
+                    return resources
 
-            # Use client's version if it's a supported legacy version
-            response_version = client_version if client_version in LEGACY_PROTOCOL_VERSIONS else PROTOCOL_VERSION
-            logger.debug(f"Using protocol version in response: {response_version}")
+                elif template.uri_template == "odoo://{model}/binary/{field}/{id}":
+                    # Get all models with binary fields
+                    models = await self.pool.execute_kw(
+                        model="ir.model",
+                        method="search_read",
+                        args=[[], ["model", "name"]],
+                        kwargs={},
+                    )
+                    resources = []
+                    for model in models:
+                        # Get binary fields
+                        fields = await self.pool.execute_kw(
+                            model=model["model"], method="fields_get", args=[], kwargs={}
+                        )
+                        binary_fields = {name: info for name, info in fields.items() if info.get("type") == "binary"}
+                        if binary_fields:
+                            # Get first record
+                            records = await self.pool.execute_kw(
+                                model=model["model"],
+                                method="search_read",
+                                args=[[], ["id"]],
+                                kwargs={"limit": 1},
+                            )
+                            if records:
+                                for field_name in binary_fields:
+                                    uri = f"odoo://{model['model']}/binary/" f"{field_name}/{records[0]['id']}"
+                                    resources.append(
+                                        Resource(
+                                            uri=uri,
+                                            type="binary",
+                                            content=None,
+                                            mime_type="application/octet-stream",
+                                            metadata={
+                                                "model": model["model"],
+                                                "name": model["name"],
+                                                "field": field_name,
+                                                "id": records[0]["id"],
+                                            },
+                                        )
+                                    )
+                    return resources
 
-            # Create response directly
-            response = {
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {
-                    "protocolVersion": response_version,
-                    "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                    "capabilities": server_info.capabilities,
-                },
-            }
-
-            logger.debug(f"Initializing client with protocol version: {response_version}")
-            return response
-
-        except Exception as e:
-            logger.error(f"Error handling initialize request: {e}")
-            return {
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "error": {"code": -32603, "message": str(e)},
-            }
-
-    async def _handle_list_resources(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle list_resources request."""
-        try:
-            resources = await self.list_resources()
-            # Convert to MCP client format with text or blob
-            resources_list = []
-            for resource in resources:
-                if isinstance(resource.content, (dict, list)):
-                    # For dictionaries and lists, always use text with JSON
-                    content = {"text": json.dumps(resource.content), "blob": None}
-                elif isinstance(resource.content, bytes):
-                    # For binary content, encode as base64
-                    content = {"text": None, "blob": base64.b64encode(resource.content).decode()}
                 else:
-                    # For other types, convert to string
-                    content = {"text": str(resource.content), "blob": None}
+                    raise ProtocolError(f"Unsupported resource template: {template.uri_template}")
 
-                # Extract model name from URI for the name field
-                uri_parts = resource.uri.replace("odoo://", "").split("/")
-                model_name = uri_parts[0] if uri_parts else "unknown"
+            else:
+                # List all resource templates
+                templates = self.capabilities_manager.list_resource_templates()
+                return [
+                    Resource(
+                        uri=template["uriTemplate"],
+                        type=template["type"],
+                        content=None,
+                        mime_type="application/json",
+                        metadata={
+                            "name": template["name"],
+                            "description": template["description"],
+                            "operations": template["operations"],
+                            "parameters": template["parameters"],
+                        },
+                    )
+                    for template in templates
+                ]
 
-                resources_list.append(
-                    {
-                        "uri": resource.uri,
-                        "type": resource.type,
-                        "content": resource.content,
-                        "mimeType": resource.mime_type,
-                        "name": model_name,
-                        **content,
+        except Exception as e:
+            if isinstance(e, ProtocolError):
+                raise
+            raise ProtocolError(f"Error listing resources: {str(e)}")
+
+    async def list_tools(self) -> List[Tool]:
+        """List available tools."""
+        return list(self.capabilities_manager.tools.values())
+
+    async def list_prompts(self) -> List[Prompt]:
+        """List available prompts."""
+        return list(self.capabilities_manager.prompts.values())
+
+    async def get_prompt(self, name: str, args: Dict[str, Any]) -> Any:
+        """Get a prompt by name."""
+        try:
+            # Find the prompt in capabilities
+            prompt = next((p for p in self.capabilities_manager._prompts if p.name == name), None)
+            if not prompt:
+                raise ProtocolError(f"Prompt not found: {name}")
+
+            # Validate arguments
+            for param_name, param_info in prompt.parameters.items():
+                if param_name not in args:
+                    raise ProtocolError(f"Missing required parameter: {param_name}")
+                # TODO: Add type validation if needed
+
+            # Execute prompt based on name
+            if name == "analyze_record":
+                return await self._handle_analyze_record_prompt(args)
+            elif name == "create_record":
+                return await self._handle_create_record_prompt(args)
+            elif name == "update_record":
+                return await self._handle_update_record_prompt(args)
+            elif name == "advanced_search":
+                return await self._handle_advanced_search_prompt(args)
+            elif name == "call_method":
+                return await self._handle_call_method_prompt(args)
+            else:
+                raise ProtocolError(f"Unsupported prompt: {name}")
+
+        except Exception as e:
+            if isinstance(e, ProtocolError):
+                raise
+            raise ProtocolError(f"Error executing prompt {name}: {str(e)}")
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a JSON-RPC request."""
+        try:
+            # Check if this is a custom tool format (array with tool objects)
+            if isinstance(request, list) and len(request) > 0:
+                # Handle custom tool format
+                tool_request = request[0]
+                if isinstance(tool_request, dict) and "tool" in tool_request:
+                    # Convert to standard format
+                    tool_name = tool_request["tool"]
+                    tool_params = tool_request.get("params", {})
+
+                    # Create a standard JSON-RPC request
+                    standard_request = {
+                        "jsonrpc": "2.0",
+                        "method": "call_tool",
+                        "params": {"name": tool_name, "arguments": tool_params},
+                        "id": None,
                     }
-                )
 
-            return {
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {"id": "list", "method": "listResources", "resources": resources_list},
-            }
+                    # Process as standard request
+                    return await self._process_standard_request(standard_request)
+
+            # Process as standard JSON-RPC request
+            return await self._process_standard_request(request)
+
         except Exception as e:
-            logger.error(f"Error handling list_resources request: {e}")
+            logger.error(f"Error processing request: {str(e)}")
             return {
                 "jsonrpc": "2.0",
-                "id": request.id,
                 "error": {"code": -32603, "message": str(e)},
+                "id": request.get("id") if isinstance(request, dict) else None,
             }
 
-    async def _handle_list_tools(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle list_tools request."""
-        try:
-            tools = await self.list_tools()
-            return {
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {
-                    "tools": [
-                        {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.parameters,
-                            "inputSchema": tool.inputSchema or {"type": "object", "properties": {}, "required": []},
-                        }
-                        for tool in tools
-                    ]
-                },
-            }
-        except Exception as e:
-            logger.error(f"Error handling list_tools request: {e}")
-            return {
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
-            }
+    async def initialize(self, client_info: ClientInfo) -> ServerInfo:
+        """Initialize the server with client information."""
+        # Get the client's requested protocol version
+        client_version = client_info.protocol_version
 
-    async def _handle_get_prompt(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle get_prompt request."""
-        try:
-            prompt = await self.get_prompt(request.params["name"], request.params.get("args", {}))
-            # Convert ProtocolHandler response to dict
-            response = self.protocol_handler.create_response(request.id, result=prompt)
-            response = response.model_dump() if hasattr(response, "model_dump") else dict(response)
-            if "error" in response and (response["error"] is None or response["error"] == {}):
-                del response["error"]
-            return response
-        except Exception as e:
-            logger.error(f"Error handling get_prompt request: {e}")
-            error_response = self.protocol_handler.handle_protocol_error(e)
-            error_response = (
-                error_response.model_dump() if hasattr(error_response, "model_dump") else dict(error_response)
+        # Validate protocol version
+        if client_version != PROTOCOL_VERSION and client_version not in LEGACY_PROTOCOL_VERSIONS:
+            raise ProtocolError(
+                f"Unsupported protocol version: {client_version}. "
+                f"Supported versions: {PROTOCOL_VERSION} and {', '.join(LEGACY_PROTOCOL_VERSIONS)}"
             )
-            if "error" in error_response and (error_response["error"] is None or error_response["error"] == {}):
-                del error_response["error"]
-            return error_response
+
+        # Create server info
+        return ServerInfo(name=SERVER_NAME, version=SERVER_VERSION, capabilities=self.capabilities)
+
+    async def run(self):
+        """Run the server."""
+        try:
+            logger.info("Starting server...")
+            if self.config.get("connection_type") == "stdio":
+                logger.info("Starting server in stdio mode")
+                await self._run_stdio()
+            else:
+                logger.info("Starting server in streamable_http mode")
+                await self._run_http()
+        except Exception as e:
+            logger.error(f"Error running server: {e}")
+            raise
 
     async def stop(self):
         """Stop the server and clean up resources."""
@@ -2467,69 +2532,6 @@ class OdooMCPServer(Server):
         except Exception as e:
             logger.error(f"Error stopping server: {e}")
             raise
-
-    async def _handle_request(self, request: Union[web.Request, Dict[str, Any]]) -> Union[web.Response, Dict[str, Any]]:
-        """Handle incoming requests."""
-        try:
-            if isinstance(request, web.Request):
-                # Handle HTTP request
-                data = await request.json()
-                logger.debug("Received HTTP request data")
-                response = await self.process_request(data)
-                logger.debug(f"Got response from process_request: {response}")
-                logger.debug(f"Response type: {type(response)}")
-                logger.debug(f"Response attributes: {dir(response)}")
-                try:
-                    # Build JSON-RPC response dict with only 'result' OR 'error'
-                    response_dict = {
-                        "jsonrpc": getattr(response, "jsonrpc", "2.0"),
-                        "id": getattr(response, "id", None),
-                    }
-                    error = getattr(response, "error", None)
-                    if error is not None:
-                        response_dict["error"] = error
-                    else:
-                        response_dict["result"] = getattr(response, "result", None)
-                    logger.debug(f"Converted response dict: {response_dict}")
-                    return web.json_response(response_dict)
-                except Exception as e:
-                    logger.error(f"Error converting response to dict: {e}")
-                    logger.exception("Full traceback for conversion error:")
-                    return web.json_response(
-                        {"error": f"Error converting response: {str(e)}", "status": "error"},
-                        status=500,
-                    )
-            else:
-                # Handle stdio request
-                logger.debug("Received stdio request")
-                response = await self.process_request(request)
-                logger.debug(f"Got response from process_request: {response}")
-                logger.debug(f"Response type: {type(response)}")
-                logger.debug(f"Response attributes: {dir(response)}")
-                try:
-                    # Build JSON-RPC response dict with only 'result' OR 'error'
-                    response_dict = {
-                        "jsonrpc": getattr(response, "jsonrpc", "2.0"),
-                        "id": getattr(response, "id", None),
-                    }
-                    error = getattr(response, "error", None)
-                    if error is not None:
-                        response_dict["error"] = error
-                    else:
-                        response_dict["result"] = getattr(response, "result", None)
-                    logger.debug(f"Converted response dict: {response_dict}")
-                    return response_dict
-                except Exception as e:
-                    logger.error(f"Error converting response to dict: {e}")
-                    logger.exception("Full traceback for conversion error:")
-                    return {"error": f"Error converting response: {str(e)}", "status": "error"}
-        except Exception as e:
-            logger.error(f"Error handling request: {e}")
-            logger.exception("Full traceback for request handling error:")
-            if isinstance(request, web.Request):
-                return web.json_response({"error": str(e), "status": "error"}, status=500)
-            else:
-                return {"error": str(e), "status": "error"}
 
 
 def run_async(coro):

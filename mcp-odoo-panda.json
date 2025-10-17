@@ -1,0 +1,8 @@
+{
+  "protocol": "jsonrpc",
+  "connection_type": "stdio",
+  "odoo_url": "http://localhost:16069",
+  "database": "develop",
+  "username": "admin",
+  "api_key": "admin"
+}

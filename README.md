@@ -398,6 +398,76 @@ To connect Claude Desktop to the Odoo MCP server using the stdio protocol:
 
 **Note:** Claude Desktop only communicates via stdio. Do not use `streamable_http` for connecting with Claude Desktop.
 
+### Connecting GitHub Copilot to the Odoo MCP server (stdio)
+
+To connect GitHub Copilot (VS Code extension) to the Odoo MCP server using the stdio protocol:
+
+#### 1. Create MCP Configuration File
+
+Create a configuration file `mcp-odoo-panda.json` in your project root with your Odoo connection settings:
+
+```json
+{
+  "protocol": "jsonrpc",
+  "connection_type": "stdio",
+  "odoo_url": "http://localhost:8069",
+  "database": "develop",
+  "username": "admin",
+  "api_key": "admin"
+}
+```
+
+> **Note:** Adjust the settings according to your Odoo instance:
+>
+> - `odoo_url`: Your Odoo server URL
+> - `database`: Your Odoo database name
+> - `username`: Your Odoo username
+> - `api_key`: Your Odoo password
+
+#### 2. Configure VS Code Settings
+
+Create or edit the MCP configuration file at `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "servers": {
+    "odoo": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/bin/odoo-mcp-server",
+      "args": [
+        "--config",
+        "${workspaceFolder}/mcp-odoo-panda.json"
+      ]
+    }
+  },
+  "inputs": []
+}
+```
+
+> **Important:**
+>
+> - The `mcp.json` file should be placed in the `.vscode` folder of your workspace
+> - Replace `${workspaceFolder}/mcp-odoo-panda.json` with the absolute path to your configuration file if it's located elsewhere
+
+#### 3. Verify Connection
+
+1. Restart VS Code or reload the window (`Ctrl+Shift+P` → "Developer: Reload Window")
+2. Open GitHub Copilot Chat (Ctrl+Shift+I or Cmd+Shift+I)
+3. Type `@odoo-mcp` in the chat to interact with your Odoo instance
+
+#### 4. Example Usage in GitHub Copilot Chat
+
+Once connected, you can use GitHub Copilot to interact with Odoo:
+
+```text
+@odoo-mcp search for partners with name containing "John"
+@odoo-mcp get details of partner with ID 5
+@odoo-mcp create a new partner with name "Test Company"
+@odoo-mcp update partner 10 to set email to "test@example.com"
+```
+
+**Note:** GitHub Copilot only communicates via stdio. Do not use `streamable_http` for connecting with GitHub Copilot.
+
 ## Documentation
 
 Complete documentation is available in the `docs/` directory:

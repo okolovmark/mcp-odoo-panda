@@ -19,7 +19,6 @@ COPY odoo_mcp/config/config.json ./odoo_mcp/config/
 RUN pip install --upgrade pip && \
     pip install -e .[caching] && \
     pip install \
-    fastmcp \
     aiohttp \
     httpx \
     pydantic \

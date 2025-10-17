@@ -255,26 +255,17 @@ class SchemaIntrospector:
             bool: True if user has access
         """
         try:
-            # Check ir.model.access
-            access_rights = await self.pool.execute_kw(
-                model="ir.model.access",
-                method="search_read",
-                args=[[("model_id.model", "=", model_name), ("group_id.users", "in", [user_id])]],
-                kwargs={"fields": ["name", "perm_read", "perm_write", "perm_create", "perm_unlink"]}
+            result = await self.pool.execute_kw(
+                model=model_name,
+                method="check_access_rights",
+                args=["read", False],
+                kwargs={},
+                uid=user_id
             )
-            
-            if not access_rights:
-                return False
-            
-            # Check if user has at least read access
-            for access in access_rights:
-                if access.get("perm_read"):
-                    return True
-            
-            return False
+            return bool(result)
             
         except Exception as e:
-            logger.error(f"Error checking model access for {model_name} and user {user_id}: {e}")
+            logger.error(f"No access to model {model_name} for user {user_id}: {e}")
             return False
 
     async def _get_model_access_rights(self, user_id: int, model_name: str) -> Dict[str, bool]:

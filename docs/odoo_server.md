@@ -175,39 +175,39 @@ response = await client.call_tool("odoo_call_method", {
 
 ### Prompt
 
-#### analyze-record
+#### analyze_record
 ```python
-result = await client.get_prompt("analyze-record", {
+result = await client.get_prompt("analyze_record", {
     "uri": "odoo://res.partner/1"
 })
 ```
 
-#### create-record
+#### create_record
 ```python
-result = await client.get_prompt("create-record", {
+result = await client.get_prompt("create_record", {
     "model": "res.partner",
     "template": {"name": "Nuovo Partner"}
 })
 ```
 
-#### update-record
+#### update_record
 ```python
-result = await client.get_prompt("update-record", {
+result = await client.get_prompt("update_record", {
     "uri": "odoo://res.partner/1"
 })
 ```
 
-#### advanced-search
+#### advanced_search
 ```python
-result = await client.get_prompt("advanced-search", {
+result = await client.get_prompt("advanced_search", {
     "model": "res.partner",
     "fields": ["name", "email"]
 })
 ```
 
-#### call-method
+#### call_method
 ```python
-result = await client.get_prompt("call-method", {
+result = await client.get_prompt("call_method", {
     "uri": "odoo://res.partner/1",
     "method": "action_archive"
 })

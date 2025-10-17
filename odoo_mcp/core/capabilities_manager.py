@@ -178,7 +178,7 @@ class CapabilitiesManager:
                                 "domain": {
                                     "type": "array",
                                     "description": "Search domain",
-                                    "items": {"type": "any"},
+                                    "items": {}
                                 },
                                 "fields": {
                                     "type": "array",
@@ -269,7 +269,7 @@ class CapabilitiesManager:
                                 "args": {
                                     "type": "array",
                                     "description": "Positional arguments for the method",
-                                    "items": {"type": "any"},
+                                    "items": {}
                                 },
                                 "kwargs": {
                                     "type": "object",
@@ -543,24 +543,6 @@ class CapabilitiesManager:
                     "args": "array",
                     "kwargs": "object",
                 },
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="view_related_records",
-                description="View records related to a specific record",
-                template="Show records related to {model} with ID {id} through field {field}",
-                parameters={"model": "string", "id": "integer", "field": "string"},
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="upload_attachment",
-                description="Upload a file attachment to a record",
-                template="Upload file {filename} to {model} with ID {id}",
-                parameters={"model": "string", "id": "integer", "filename": "string"},
             )
         )
 

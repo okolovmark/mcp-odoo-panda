@@ -29,7 +29,6 @@ classifiers = [
 keywords = ["odoo", "mcp", "erp", "integration", "rpc", "model-context-protocol", "async", "asyncio"]
 
 dependencies = [
-    "fastmcp>=0.1.0",
     "requests>=2.20.0",
     "httpx>=0.20.0",
     "PyYAML>=5.4",
