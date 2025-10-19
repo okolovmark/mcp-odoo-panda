@@ -8,7 +8,7 @@ import asyncio
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 
-from odoo_mcp.core.connection_pool import ConnectionPool, get_connection_pool
+from odoo_mcp.core.connection_pool import ConnectionPool
 from odoo_mcp.error_handling.exceptions import (
     OdooMCPError,
     ConfigurationError,
@@ -20,25 +20,6 @@ logger = logging.getLogger(__name__)
 
 # Global authenticator instance
 _authenticator = None
-
-
-def initialize_authenticator(config: Dict[str, Any]) -> None:
-    """
-    Initialize the global authenticator.
-
-    Args:
-        config: Configuration dictionary
-
-    Raises:
-        ConfigurationError: If the authenticator is already initialized
-    """
-    global _authenticator
-    if _authenticator is not None:
-        raise ConfigurationError("Authenticator is already initialized")
-
-    pool = get_connection_pool()
-    _authenticator = Authenticator(config, pool)
-    logger.info("Authenticator initialized successfully")
 
 
 def get_authenticator() -> "Authenticator":

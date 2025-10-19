@@ -4,20 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-odoo-panda"
-version = "0.1.1"
+version = "0.1.2"
 description = "A Model Context Protocol (MCP) server for Odoo ERP integration."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
-  { name = "Paolo Nugnes", email = "info@techlab.it" },
-  { name = "TechLab", email = "info@techlab.it" },
+    { name = "Mark Okolov", email = "okolovmark@gmail.com" },
+    { name = "Paolo Nugnes", email = "info@techlab.it" },
+    { name = "TechLab", email = "info@techlab.it" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
@@ -80,7 +84,7 @@ include = ["mcp*", "odoo_mcp*"]
 exclude = ["odoo_mcp.tests*", "odoo_mcp.examples*"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -88,18 +92,18 @@ check_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [tool.flake8]
-max-line-length = 120
+max-line-length = 100
 exclude = [".git", "__pycache__", "build", "dist"]
 per-file-ignores = [
     "__init__.py:F401",
 ]
 
 [tool.black]
-line-length = 120
-target-version = ["py39"]
+line-length = 100
+target-version = ["py313"]
 include = '\.pyi?$'
 
 [tool.isort]
 profile = "black"
 multi_line_output = 3
-line_length = 120
+line_length = 100

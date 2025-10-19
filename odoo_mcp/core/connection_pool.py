@@ -14,56 +14,15 @@ from odoo_mcp.core.base_handler import BaseOdooHandler
 from odoo_mcp.error_handling.exceptions import (
     AuthError,
     ConfigurationError,
-    ConnectionError,
     NetworkError,
     OdooMCPError,
     OdooRecordNotFoundError,
     OdooValidationError,
     PoolTimeoutError,
     ProtocolError,
-    SessionError,
 )
 
 logger = logging.getLogger(__name__)
-
-# Global connection pool instance
-_connection_pool = None
-
-
-def initialize_connection_pool(
-    config: Dict[str, Any], handler_factory: callable
-) -> None:
-    """
-    Initialize the global connection pool.
-
-    Args:
-        config: The server configuration dictionary
-        handler_factory: The handler factory function to use
-
-    Raises:
-        ConfigurationError: If the pool is already initialized
-    """
-    global _connection_pool
-    if _connection_pool is not None:
-        raise ConfigurationError("Connection pool is already initialized")
-
-    _connection_pool = ConnectionPool(config, handler_factory)
-    logger.info("Connection pool initialized successfully")
-
-
-def get_connection_pool() -> "ConnectionPool":
-    """
-    Get the global connection pool instance.
-
-    Returns:
-        ConnectionPool: The global connection pool instance
-
-    Raises:
-        ConfigurationError: If the pool is not initialized
-    """
-    if _connection_pool is None:
-        raise ConfigurationError("Connection pool is not initialized")
-    return _connection_pool
 
 
 class ConnectionWrapper:

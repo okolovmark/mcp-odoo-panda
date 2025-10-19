@@ -424,7 +424,13 @@ Create a configuration file `mcp-odoo-panda.json` in your project root with your
 > - `username`: Your Odoo username
 > - `api_key`: Your Odoo password
 
-#### 2. Configure VS Code Settings
+#### 2. Install package to your python environment
+
+```bash
+python -m pip install -e .
+```
+
+#### 3. Configure VS Code Settings
 
 Create or edit the MCP configuration file at `.vscode/mcp.json` in your workspace:
 
@@ -449,13 +455,13 @@ Create or edit the MCP configuration file at `.vscode/mcp.json` in your workspac
 > - The `mcp.json` file should be placed in the `.vscode` folder of your workspace
 > - Replace `${workspaceFolder}/mcp-odoo-panda.json` with the absolute path to your configuration file if it's located elsewhere
 
-#### 3. Verify Connection
+#### 4. Verify Connection
 
 1. Restart VS Code or reload the window (`Ctrl+Shift+P` → "Developer: Reload Window")
 2. Open GitHub Copilot Chat (Ctrl+Shift+I or Cmd+Shift+I)
 3. Type `@odoo-mcp` in the chat to interact with your Odoo instance
 
-#### 4. Example Usage in GitHub Copilot Chat
+#### 5. Example Usage in GitHub Copilot Chat
 
 Once connected, you can use GitHub Copilot to interact with Odoo:
 

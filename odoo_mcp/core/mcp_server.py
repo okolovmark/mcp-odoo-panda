@@ -39,7 +39,6 @@ from odoo_mcp.error_handling.exceptions import (
     ProtocolError,
 )
 from odoo_mcp.performance.caching import initialize_cache_manager
-from odoo_mcp.security.utils import RateLimiter
 from odoo_mcp.tools.orm_tools import ORMTools
 
 # Constants
@@ -395,16 +394,8 @@ class OdooMCPServer(Server):
         self.pool = ConnectionPool(self.config, HandlerFactory.create_handler)
         self.authenticator = Authenticator(self.config, self.pool)
         self.session_manager = SessionManager(self.config, self.authenticator, self.pool)
-        self.rate_limiter = RateLimiter(
-            requests_per_minute=config.get("requests_per_minute", 60),
-            max_wait_seconds=config.get("rate_limit_max_wait_seconds", 30),
-        )
         self.bus_handler = OdooBusHandler(self.config, self.pool)
-
-        # Initialize ORM tools
-        logger.info("Initializing ORM tools...")
         self.orm_tools = ORMTools(self.pool, self.config)
-        logger.info("ORM tools initialized successfully")
 
         # Initialize protocol
         if self.connection_type == "stdio":
@@ -575,15 +566,6 @@ class OdooMCPServer(Server):
                 }
             },
             {
-                "name": "odoo_domain_validate",
-                "description": "Validate and compile a domain expression using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "domain_json": {"type": "object", "description": "Domain expression in JSON format"}
-                }
-            },
-            {
                 "name": "odoo_search_read",
                 "description": "Search and read records with security enhancements using global authentication",
                 "operations": ["read"],
@@ -636,37 +618,6 @@ class OdooMCPServer(Server):
                     "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
                     "values": {"type": "object", "description": "Values to write"},
                     "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
-                }
-            },
-            {
-                "name": "odoo_actions_next_steps",
-                "description": "Get next steps suggestions for a record using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "record_id": {"type": "integer", "description": "Record ID"}
-                }
-            },
-            {
-                "name": "odoo_actions_call",
-                "description": "Call an action method on a record using global authentication",
-                "operations": ["update"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "record_id": {"type": "integer", "description": "Record ID"},
-                    "method": {"type": "string", "description": "Method name to call"},
-                    "parameters": {"type": "object", "description": "Method parameters", "optional": True},
-                    "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
-                }
-            },
-            {
-                "name": "odoo_picklists",
-                "description": "Get picklist values for a field using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "field": {"type": "string", "description": "Field name"},
-                    "limit": {"type": "integer", "description": "Maximum number of values", "default": 100}
                 }
             }
         ]
@@ -1725,16 +1676,6 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name == "odoo_domain_validate":
-                    model = tool_args.get("model")
-                    domain_json = tool_args.get("domain_json")
-                    result = await self.orm_tools.domain_validate(model, domain_json)
-                    content = [{"type": "text", "text": json.dumps(result.dict(), default=str)}]
-                    return {
-                        "jsonrpc": "2.0",
-                        "result": {"content": content},
-                        "id": jsonrpc_request.id,
-                    }
                 elif tool_name == "odoo_search_read":
                     model = tool_args.get("model")
                     domain_json = tool_args.get("domain_json")
@@ -1789,40 +1730,6 @@ class OdooMCPServer(Server):
                     values = tool_args.get("values")
                     operation_id = tool_args.get("operation_id")
                     result = await self.orm_tools.write(model, record_ids, values, operation_id)
-                    content = [{"type": "text", "text": json.dumps(result, default=str)}]
-                    return {
-                        "jsonrpc": "2.0",
-                        "result": {"content": content},
-                        "id": jsonrpc_request.id,
-                    }
-                elif tool_name == "odoo_actions_next_steps":
-                    model = tool_args.get("model")
-                    record_id = tool_args.get("record_id")
-                    result = await self.orm_tools.actions_next_steps(model, record_id)
-                    content = [{"type": "text", "text": json.dumps(result.dict(), default=str)}]
-                    return {
-                        "jsonrpc": "2.0",
-                        "result": {"content": content},
-                        "id": jsonrpc_request.id,
-                    }
-                elif tool_name == "odoo_actions_call":
-                    model = tool_args.get("model")
-                    record_id = tool_args.get("record_id")
-                    method = tool_args.get("method")
-                    parameters = tool_args.get("parameters")
-                    operation_id = tool_args.get("operation_id")
-                    result = await self.orm_tools.actions_call(model, record_id, method, parameters, operation_id)
-                    content = [{"type": "text", "text": json.dumps(result.dict(), default=str)}]
-                    return {
-                        "jsonrpc": "2.0",
-                        "result": {"content": content},
-                        "id": jsonrpc_request.id,
-                    }
-                elif tool_name == "odoo_picklists":
-                    model = tool_args.get("model")
-                    field = tool_args.get("field")
-                    limit = tool_args.get("limit", 100)
-                    result = await self.orm_tools.picklists(model, field, limit)
                     content = [{"type": "text", "text": json.dumps(result, default=str)}]
                     return {
                         "jsonrpc": "2.0",

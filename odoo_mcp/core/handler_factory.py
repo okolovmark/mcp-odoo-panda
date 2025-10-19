@@ -87,18 +87,3 @@ class HandlerFactory:
     def is_protocol_supported(cls, protocol: str) -> bool:
         """Check if a protocol is supported."""
         return protocol.lower() in cls._handler_registry
-
-
-# Convenience function for backward compatibility
-def create_odoo_handler(config: Dict[str, Any]) -> BaseOdooHandler:
-    """
-    Create an Odoo handler from configuration.
-    
-    Args:
-        config: Configuration dictionary containing 'protocol' key
-        
-    Returns:
-        BaseOdooHandler: Appropriate handler instance
-    """
-    protocol = config.get("protocol", "xmlrpc")
-    return HandlerFactory.create_handler(protocol, config)

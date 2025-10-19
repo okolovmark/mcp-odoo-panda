@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Schema cache with TTL (default 10 minutes)
 SCHEMA_CACHE_TTL = 600  # 10 minutes
 
 

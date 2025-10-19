@@ -63,28 +63,6 @@ class ConfigurationError(OdooMCPError):
         super().__init__(message, code=-32004, original_exception=original_exception)
 
 
-class ConnectionError(OdooMCPError):
-    """Connection error."""
-
-    def __init__(
-        self,
-        message: str = "Connection error occurred",
-        original_exception: Optional[Exception] = None,
-    ):
-        super().__init__(message, code=-32005, original_exception=original_exception)
-
-
-class SessionError(OdooMCPError):
-    """Session error."""
-
-    def __init__(
-        self,
-        message: str = "Session error occurred",
-        original_exception: Optional[Exception] = None,
-    ):
-        super().__init__(message, code=-32006, original_exception=original_exception)
-
-
 class OdooValidationError(OdooMCPError):
     """Odoo validation error."""
 
@@ -112,52 +90,6 @@ class PoolTimeoutError(OdooMCPError):
         original_exception: Optional[Exception] = None,
     ):
         super().__init__(message, code=-32009, original_exception=original_exception)
-
-
-class RateLimitError(OdooMCPError):
-    """Rate limit error."""
-
-    def __init__(self, message: str = "Rate limit exceeded", original_exception: Optional[Exception] = None):
-        super().__init__(message, code=-32010, original_exception=original_exception)
-
-
-class ResourceError(OdooMCPError):
-    """Resource error."""
-
-    def __init__(
-        self,
-        message: str = "Resource error occurred",
-        original_exception: Optional[Exception] = None,
-    ):
-        super().__init__(message, code=-32011, original_exception=original_exception)
-
-
-class ToolError(OdooMCPError):
-    """Tool error."""
-
-    def __init__(self, message: str = "Tool error occurred", original_exception: Optional[Exception] = None):
-        super().__init__(message, code=-32012, original_exception=original_exception)
-
-
-class PromptError(OdooMCPError):
-    """Prompt error."""
-
-    def __init__(self, message: str = "Prompt error occurred", original_exception: Optional[Exception] = None):
-        super().__init__(message, code=-32013, original_exception=original_exception)
-
-
-class CacheError(OdooMCPError):
-    """Cache error."""
-
-    def __init__(self, message: str = "Cache error occurred", original_exception: Optional[Exception] = None):
-        super().__init__(message, code=-32014, original_exception=original_exception)
-
-
-class BusError(OdooMCPError):
-    """Bus error."""
-
-    def __init__(self, message: str = "Bus error occurred", original_exception: Optional[Exception] = None):
-        super().__init__(message, code=-32015, original_exception=original_exception)
 
 
 class OdooMethodNotFoundError(OdooMCPError):
