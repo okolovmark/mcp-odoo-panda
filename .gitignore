@@ -67,7 +67,7 @@ ENV/
 
 # IDE
 .idea/
-# .vscode/
+.vscode/
 *.swp
 *.swo
 *.sublime-project
