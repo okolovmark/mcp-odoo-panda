@@ -7,8 +7,8 @@ with user-specific access control and caching.
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from datetime import datetime, timezone
+from typing import Any
 
 from cachetools import TTLCache
 from pydantic import BaseModel, Field
@@ -20,15 +20,16 @@ SCHEMA_CACHE_TTL = 600  # 10 minutes
 
 class FieldInfo(BaseModel):
     """Field information model."""
+
     name: str
     ttype: str
     required: bool = False
     readonly: bool = False
-    relation: Optional[str] = None
-    selection: Optional[List[Tuple[str, str]]] = None
-    domain: Optional[List] = None
+    relation: str | None = None
+    selection: list[tuple[str, str]] | None = None
+    domain: list | str | None = None
     store: bool = True
-    compute: Optional[str] = None
+    compute: str | None = None
     writeable: bool = True
 
     def __post_init__(self):
@@ -38,14 +39,16 @@ class FieldInfo(BaseModel):
 
 class ModelSchema(BaseModel):
     """Model schema information."""
+
     name: str
-    fields: Dict[str, FieldInfo]
-    access_rights: Dict[str, bool]  # create, read, write, delete
-    record_rules: List[str] = Field(default_factory=list)
+    fields: dict[str, FieldInfo]
+    access_rights: dict[str, bool]  # create, read, write, delete
+    record_rules: list[str] = Field(default_factory=list)
 
 
 class SchemaVersion(BaseModel):
     """Schema version information."""
+
     version: str
     timestamp: datetime
     models_count: int
@@ -55,10 +58,10 @@ class SchemaVersion(BaseModel):
 class SchemaIntrospector:
     """Handles Odoo model introspection and schema discovery."""
 
-    def __init__(self, connection_pool, config: Dict[str, Any]):
+    def __init__(self, connection_pool, config: dict[str, Any]):
         """
         Initialize the schema introspector.
-        
+
         Args:
             connection_pool: Odoo connection pool
             config: Server configuration
@@ -66,10 +69,10 @@ class SchemaIntrospector:
         self.pool = connection_pool
         self.config = config
         self.cache_ttl = config.get("schema_cache_ttl", SCHEMA_CACHE_TTL)
-        
+
         # User-specific schema cache: {user_id: {model: ModelSchema}}
-        self._schema_cache: Dict[int, TTLCache] = {}
-        
+        self._schema_cache: dict[int, TTLCache] = {}
+
         # Global schema version cache
         self._version_cache: TTLCache = TTLCache(maxsize=100, ttl=self.cache_ttl)
 
@@ -82,88 +85,88 @@ class SchemaIntrospector:
     async def get_schema_version(self, user_id: int) -> SchemaVersion:
         """
         Get the current schema version for a user.
-        
+
         Args:
             user_id: Odoo user ID
-            
+
         Returns:
             SchemaVersion: Current schema version information
         """
         cache_key = f"version:{user_id}"
-        
+
         # Check cache first
         if cache_key in self._version_cache:
             return self._version_cache[cache_key]
-        
+
         try:
             # Get accessible models and their fields
             models = await self.list_models(user_id, with_access=True)
             total_fields = 0
-            
+
             # Calculate hash from models and fields
             schema_data = {}
             for model_name in models:
                 fields = await self.list_fields(user_id, model_name)
                 schema_data[model_name] = {
-                    "fields": [f.dict() for f in fields.values()],
-                    "access": await self._get_model_access_rights(user_id, model_name)
+                    "fields": [f.model_dump() for f in fields.values()],
+                    "access": await self._get_model_access_rights(user_id, model_name),
                 }
                 total_fields += len(fields)
-            
+
             # Generate deterministic hash
-            payload = json.dumps(schema_data, sort_keys=True, separators=(',', ':'))
+            payload = json.dumps(schema_data, sort_keys=True, separators=(",", ":"))
             version_hash = hashlib.sha256(payload.encode()).hexdigest()[:16]
-            
+
             version_info = SchemaVersion(
                 version=version_hash,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 models_count=len(models),
-                fields_count=total_fields
+                fields_count=total_fields,
             )
-            
+
             # Cache the version
             self._version_cache[cache_key] = version_info
             return version_info
-            
+
         except Exception as e:
             logger.error(f"Error getting schema version for user {user_id}: {e}")
             # Return a fallback version
             return SchemaVersion(
                 version="unknown",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 models_count=0,
-                fields_count=0
+                fields_count=0,
             )
 
-    async def list_models(self, user_id: int, with_access: bool = True) -> List[str]:
+    async def list_models(self, user_id: int, with_access: bool = True) -> list[str]:
         """
         List accessible models for a user.
-        
+
         Args:
             user_id: Odoo user ID
             with_access: Whether to filter by access rights
-            
+
         Returns:
             List[str]: List of accessible model names
         """
         cache_key = f"models:{user_id}"
         user_cache = self._get_user_cache(user_id)
-        
+
         # Check cache first
         if cache_key in user_cache:
             return user_cache[cache_key]
-        
+
         try:
             # Get all models
             models = await self.pool.execute_kw(
                 model="ir.model",
                 method="search_read",
                 args=[[("state", "=", "base")]],
-                kwargs={"fields": ["model", "name"]}
+                kwargs={"fields": ["model", "name"]},
             )
-            
+
             model_names = [m["model"] for m in models]
-            
+
             if with_access:
                 # Filter by access rights
                 accessible_models = []
@@ -171,42 +174,54 @@ class SchemaIntrospector:
                     if await self._check_model_access(user_id, model_name):
                         accessible_models.append(model_name)
                 model_names = accessible_models
-            
+
             # Cache the result
             user_cache[cache_key] = model_names
             return model_names
-            
+
         except Exception as e:
             logger.error(f"Error listing models for user {user_id}: {e}")
             return []
 
-    async def list_fields(self, user_id: int, model_name: str) -> Dict[str, FieldInfo]:
+    async def list_fields(self, user_id: int, model_name: str) -> dict[str, FieldInfo]:
         """
         List fields for a specific model.
-        
+
         Args:
             user_id: Odoo user ID
             model_name: Name of the model
-            
+
         Returns:
             Dict[str, FieldInfo]: Field information dictionary
         """
         cache_key = f"fields:{user_id}:{model_name}"
         user_cache = self._get_user_cache(user_id)
-        
+
         # Check cache first
         if cache_key in user_cache:
             return user_cache[cache_key]
-        
+
         try:
             # Get model fields
             model_info = await self.pool.execute_kw(
                 model="ir.model.fields",
                 method="search_read",
                 args=[[("model", "=", model_name)]],
-                kwargs={"fields": ["name", "ttype", "required", "readonly", "relation", "selection", "domain", "store", "compute"]}
+                kwargs={
+                    "fields": [
+                        "name",
+                        "ttype",
+                        "required",
+                        "readonly",
+                        "relation",
+                        "selection",
+                        "domain",
+                        "store",
+                        "compute",
+                    ]
+                },
             )
-            
+
             fields = {}
             for field_info in model_info:
                 # Handle selection fields
@@ -220,7 +235,7 @@ class SchemaIntrospector:
                             selection = [("value", "Label")]  # Placeholder
                     except:
                         selection = None
-                
+
                 field = FieldInfo(
                     name=field_info["name"],
                     ttype=field_info["ttype"],
@@ -230,14 +245,14 @@ class SchemaIntrospector:
                     selection=selection,
                     domain=field_info.get("domain"),
                     store=field_info.get("store", True),
-                    compute=field_info.get("compute")
+                    compute=field_info.get("compute"),
                 )
                 fields[field.name] = field
-            
+
             # Cache the result
             user_cache[cache_key] = fields
             return fields
-            
+
         except Exception as e:
             logger.error(f"Error listing fields for model {model_name} and user {user_id}: {e}")
             return {}
@@ -245,11 +260,11 @@ class SchemaIntrospector:
     async def _check_model_access(self, user_id: int, model_name: str) -> bool:
         """
         Check if user has access to a model.
-        
+
         Args:
             user_id: Odoo user ID
             model_name: Name of the model
-            
+
         Returns:
             bool: True if user has access
         """
@@ -259,22 +274,22 @@ class SchemaIntrospector:
                 method="check_access_rights",
                 args=["read", False],
                 kwargs={},
-                uid=user_id
+                uid=user_id,
             )
             return bool(result)
-            
+
         except Exception as e:
             logger.error(f"No access to model {model_name} for user {user_id}: {e}")
             return False
 
-    async def _get_model_access_rights(self, user_id: int, model_name: str) -> Dict[str, bool]:
+    async def _get_model_access_rights(self, user_id: int, model_name: str) -> dict[str, bool]:
         """
         Get detailed access rights for a model.
-        
+
         Args:
             user_id: Odoo user ID
             model_name: Name of the model
-            
+
         Returns:
             Dict[str, bool]: Access rights dictionary
         """
@@ -283,12 +298,12 @@ class SchemaIntrospector:
                 model="ir.model.access",
                 method="search_read",
                 args=[[("model_id.model", "=", model_name), ("group_id.users", "in", [user_id])]],
-                kwargs={"fields": ["perm_read", "perm_write", "perm_create", "perm_unlink"]}
+                kwargs={"fields": ["perm_read", "perm_write", "perm_create", "perm_unlink"]},
             )
-            
+
             if not access_rights:
                 return {"read": False, "write": False, "create": False, "delete": False}
-            
+
             # Aggregate rights from all groups
             rights = {"read": False, "write": False, "create": False, "delete": False}
             for access in access_rights:
@@ -296,17 +311,17 @@ class SchemaIntrospector:
                 rights["write"] |= access.get("perm_write", False)
                 rights["create"] |= access.get("perm_create", False)
                 rights["delete"] |= access.get("perm_unlink", False)
-            
+
             return rights
-            
+
         except Exception as e:
             logger.error(f"Error getting access rights for {model_name} and user {user_id}: {e}")
             return {"read": False, "write": False, "create": False, "delete": False}
 
-    def invalidate_user_cache(self, user_id: int, model_name: Optional[str] = None):
+    def invalidate_user_cache(self, user_id: int, model_name: str | None = None):
         """
         Invalidate cache for a specific user and optionally a specific model.
-        
+
         Args:
             user_id: Odoo user ID
             model_name: Optional model name to invalidate
@@ -314,7 +329,11 @@ class SchemaIntrospector:
         if user_id in self._schema_cache:
             if model_name:
                 # Invalidate specific model cache
-                cache_keys = [k for k in self._schema_cache[user_id].keys() if k.startswith(f"fields:{user_id}:{model_name}")]
+                cache_keys = [
+                    k
+                    for k in self._schema_cache[user_id].keys()
+                    if k.startswith(f"fields:{user_id}:{model_name}")
+                ]
                 for key in cache_keys:
                     del self._schema_cache[user_id][key]
             else:
