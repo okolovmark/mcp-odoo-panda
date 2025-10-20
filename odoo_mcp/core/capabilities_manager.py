@@ -1,12 +1,12 @@
 """
 Capabilities Manager implementation for Odoo MCP Server.
-This module provides capability management and feature flag handling.
+This module provides capability management.
 """
 
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ class ResourceTemplate:
     name: str
     type: ResourceType
     description: str
-    operations: List[str]
-    parameters: Optional[Dict[str, Any]] = None
+    operations: list[str]
+    parameters: dict[str, Any] | None = None
 
 
 @dataclass
@@ -37,9 +37,9 @@ class Tool:
 
     name: str
     description: str
-    operations: List[str]
-    parameters: Optional[Dict[str, Any]] = None
-    inputSchema: Optional[Dict[str, Any]] = None
+    operations: list[str]
+    parameters: dict[str, Any] | None = None
+    inputSchema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -49,13 +49,13 @@ class Prompt:
     name: str
     description: str
     template: str
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: dict[str, Any] | None = None
 
 
 class CapabilitiesManager:
     """Manages server capabilities and feature flags."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """
         Initialize capabilities manager.
 
@@ -63,22 +63,16 @@ class CapabilitiesManager:
             config: Configuration dictionary
         """
         self.config = config
-        self.resources: Dict[str, ResourceTemplate] = {}
-        self.tools: Dict[str, Tool] = {}
-        self.prompts: Dict[str, Prompt] = {}
-        self.feature_flags: Dict[str, bool] = {
-            "prompts.listChanged": True,
-            "resources.subscribelistChanged": True,
-            "tools.listChanged": True,
-            "logging": True,
-            "completion": True,
-        }
+        self.resources: dict[str, ResourceTemplate] = {}
+        self.tools: dict[str, Tool] = {}
+        self.prompts: dict[str, Prompt] = {}
 
         # Register default capabilities
-        self._register_default_capabilities()
+        self._register_resources()
+        self._register_tools()
 
-    def _register_default_capabilities(self) -> None:
-        """Register default server capabilities."""
+    def _register_resources(self) -> None:
+        """Register default server resources."""
         # Register resource templates
         self.register_resource(
             ResourceTemplate(
@@ -149,402 +143,189 @@ class CapabilitiesManager:
             )
         )
 
-        # Register tools with proper inputSchema
-        self.register_tool(
-            Tool(
-                name="odoo_search_read",
-                description="Search and read records in Odoo",
-                operations=["search_read"],
+        self.register_resource(
+            ResourceTemplate(
+                name="Odoo Record",
+                type=ResourceType.RECORD,
+                description="Represents a single record in an Odoo model",
+                operations=["read", "write", "delete"],
                 parameters={
+                    "uri_template": "odoo://{model}/{id}",
+                    "list_uri_template": "odoo://{model}/list",
+                    "binary_uri_template": "odoo://{model}/binary/{field}/{id}",
+                },
+            )
+        )
+
+        self.register_resource(
+            ResourceTemplate(
+                name="Odoo Record List",
+                type=ResourceType.LIST,
+                description="Represents a list of records in an Odoo model",
+                operations=["read", "search"],
+                parameters={"uri_template": "odoo://{model}/list"},
+            )
+        )
+
+        self.register_resource(
+            ResourceTemplate(
+                name="Odoo Binary Field",
+                type=ResourceType.BINARY,
+                description="Represents a binary field value from an Odoo record",
+                operations=["read", "write"],
+                parameters={"uri_template": "odoo://{model}/binary/{field}/{id}"},
+            )
+        )
+
+    def _register_tools(self) -> None:
+        """Register tools for Odoo ORM operations."""
+        
+        def create_input_schema(parameters: dict[str, Any]) -> dict[str, Any]:
+            """Convert parameters dict to proper JSON Schema inputSchema format."""
+            properties = {}
+            required = []
+
+            for param_name, param_def in parameters.items():
+                # Skip 'optional' fields and other metadata
+                if param_name in ['optional', 'default']:
+                    continue
+
+                param_schema = {}
+                if 'type' in param_def:
+                    param_schema['type'] = param_def['type']
+                if 'description' in param_def:
+                    param_schema['description'] = param_def['description']
+                if 'items' in param_def:
+                    param_schema['items'] = param_def['items']
+                properties[param_name] = param_schema
+
+                # Add to required if not optional and no default
+                if not param_def.get('optional', False) and 'default' not in param_def:
+                    required.append(param_name)
+
+            return {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        
+        # Define tool parameters
+        tool_definitions = [
+            {
+                "name": "odoo_schema_version",
+                "description": "Get the current schema version using global authentication",
+                "operations": ["read"],
+                "parameters": {}
+            },
+            {
+                "name": "odoo_execute_kw",
+                "description": "Execute an arbitrary method on an Odoo model",
+                "operations": ["execute"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
-                    "domain": {"type": "array", "description": "Search domain"},
-                    "fields": {"type": "array", "description": "Fields to return"},
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of records to return",
-                    },
-                    "offset": {"type": "integer", "description": "Number of records to skip"},
+                    "method": {"type": "string", "description": "Method name to execute"},
+                    "args": {"type": "array", "description": "Positional arguments for the method", "optional": True},
+                    "kwargs": {"type": "object", "description": "Keyword arguments for the method", "optional": True},
                 },
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "domain": {
-                                    "type": "array",
-                                    "description": "Search domain",
-                                    "items": {}
-                                },
-                                "fields": {
-                                    "type": "array",
-                                    "description": "Fields to return",
-                                    "items": {"type": "string"},
-                                },
-                                "limit": {
-                                    "type": "integer",
-                                    "description": "Maximum number of records to return",
-                                },
-                                "offset": {
-                                    "type": "integer",
-                                    "description": "Number of records to skip",
-                                },
-                            },
-                            "required": ["model"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        self.register_tool(
-            Tool(
-                name="odoo_read",
-                description="Read records from Odoo",
-                operations=["read"],
-                parameters={
+            },
+            {
+                "name": "odoo_unlink",
+                "description": "Delete records from an Odoo model",
+                "operations": ["unlink"],
+                "parameters": {
                     "model": {"type": "string", "description": "Model name"},
-                    "ids": {"type": "array", "description": "Record IDs"},
-                    "fields": {"type": "array", "description": "Fields to return"},
+                    "ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs to delete"}
                 },
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "ids": {
-                                    "type": "array",
-                                    "description": "Record IDs to read",
-                                    "items": {"type": "integer"},
-                                },
-                                "fields": {
-                                    "type": "array",
-                                    "description": "Fields to return",
-                                    "items": {"type": "string"},
-                                },
-                            },
-                            "required": ["model", "ids"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
+            },
+            {
+                "name": "odoo_schema_models",
+                "description": "List accessible models using global authentication",
+                "operations": ["read"],
+                "parameters": {
+                    "with_access": {"type": "boolean", "description": "Whether to filter by access rights", "default": True}
+                }
+            },
+            {
+                "name": "odoo_schema_fields",
+                "description": "Get fields for a specific model using global authentication",
+                "operations": ["read"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"}
+                }
+            },
+            {
+                "name": "odoo_search_read",
+                "description": "Search and read records with security enhancements using global authentication",
+                "operations": ["read"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"},
+                    "domain_json": {"type": "object", "description": "Search domain in JSON format", "optional": True},
+                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True},
+                    "limit": {"type": "integer", "description": "Maximum number of records", "default": 50},
+                    "offset": {"type": "integer", "description": "Number of records to skip", "default": 0},
+                    "order": {"type": "string", "description": "Order specification", "optional": True}
+                }
+            },
+            {
+                "name": "odoo_name_search",
+                "description": "Search records by name with security using global authentication",
+                "operations": ["read"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"},
+                    "name": {"type": "string", "description": "Name to search for"},
+                    "operator": {"type": "string", "description": "Search operator", "default": "ilike"},
+                    "limit": {"type": "integer", "description": "Maximum number of results", "default": 10}
+                }
+            },
+            {
+                "name": "odoo_read",
+                "description": "Read records with security using global authentication",
+                "operations": ["read"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"},
+                    "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
+                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True}
+                }
+            },
+            {
+                "name": "odoo_create",
+                "description": "Create a record with validation and security using global authentication",
+                "operations": ["create"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"},
+                    "values": {"type": "object", "description": "Record values"},
+                    "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
+                }
+            },
+            {
+                "name": "odoo_write",
+                "description": "Write to records with validation and security using global authentication",
+                "operations": ["update"],
+                "parameters": {
+                    "model": {"type": "string", "description": "Model name"},
+                    "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
+                    "values": {"type": "object", "description": "Values to write"},
+                    "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
+                }
+            }
+        ]
 
-        self.register_tool(
-            Tool(
-                name="odoo_execute_kw",
-                description="Execute an arbitrary method on an Odoo model",
-                operations=["execute"],
-                parameters={
-                    "model": "string",
-                    "method": "string",
-                    "args": "array",
-                    "kwargs": "object",
-                },
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "method": {
-                                    "type": "string",
-                                    "description": "Name of the method to execute",
-                                },
-                                "args": {
-                                    "type": "array",
-                                    "description": "Positional arguments for the method",
-                                    "items": {}
-                                },
-                                "kwargs": {
-                                    "type": "object",
-                                    "description": "Keyword arguments for the method",
-                                    "additionalProperties": True,
-                                },
-                            },
-                            "required": ["model", "method"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
+        # Create Tool objects with proper inputSchema
+        orm_tools = []
+        for tool_def in tool_definitions:
+            orm_tools.append(Tool(
+                name=tool_def["name"],
+                description=tool_def["description"],
+                operations=tool_def["operations"],
+                parameters=tool_def["parameters"],
+                inputSchema=create_input_schema(tool_def["parameters"])
+            ))
 
-        self.register_tool(
-            Tool(
-                name="data_export",
-                description="Export Odoo data to various formats",
-                operations=["csv", "excel", "json", "xml"],
-                parameters={
-                    "model": "string",
-                    "ids": "array",
-                    "fields": "array",
-                    "format": "string",
-                },
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "ids": {
-                                    "type": "array",
-                                    "description": "List of record IDs to export",
-                                    "items": {"type": "integer"},
-                                },
-                                "fields": {
-                                    "type": "array",
-                                    "description": "List of fields to export",
-                                    "items": {"type": "string"},
-                                },
-                                "format": {
-                                    "type": "string",
-                                    "description": "Export format",
-                                    "enum": ["csv", "excel", "json", "xml"],
-                                },
-                            },
-                            "required": ["model", "format"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
+        for tool in orm_tools:
+            logger.info(f"Registering ORM tool: {tool.name}")
+            self.register_tool(tool)
+            logger.info(f"ORM tool {tool.name} registered successfully")
 
-        self.register_tool(
-            Tool(
-                name="data_import",
-                description="Import data into Odoo",
-                operations=["csv", "excel", "json", "xml"],
-                parameters={"model": "string", "data": "string", "format": "string"},
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "data": {
-                                    "type": "string",
-                                    "description": "Data to import in the specified format",
-                                },
-                                "format": {
-                                    "type": "string",
-                                    "description": "Import format",
-                                    "enum": ["csv", "excel", "json", "xml"],
-                                },
-                            },
-                            "required": ["model", "data", "format"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        self.register_tool(
-            Tool(
-                name="report_generator",
-                description="Generate an Odoo report",
-                operations=["pdf", "html"],
-                parameters={"report_name": "string", "ids": "array", "format": "string"},
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "report_name": {
-                                    "type": "string",
-                                    "description": "Name of the report to generate",
-                                },
-                                "ids": {
-                                    "type": "array",
-                                    "description": "List of record IDs to include in the report",
-                                    "items": {"type": "integer"},
-                                },
-                                "format": {
-                                    "type": "string",
-                                    "description": "Report format",
-                                    "enum": ["pdf", "html"],
-                                },
-                            },
-                            "required": ["report_name", "ids", "format"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        self.register_tool(
-            Tool(
-                name="odoo_create",
-                description="Create a new record in an Odoo model",
-                operations=["create"],
-                parameters={"model": "string", "values": "object"},
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "values": {
-                                    "type": "object",
-                                    "description": "Field values for the new record",
-                                    "additionalProperties": True,
-                                },
-                            },
-                            "required": ["model", "values"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        self.register_tool(
-            Tool(
-                name="odoo_write",
-                description="Update an existing record in an Odoo model",
-                operations=["write"],
-                parameters={"model": "string", "ids": "array", "values": "object"},
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "ids": {
-                                    "type": "array",
-                                    "description": "Record IDs to update",
-                                    "items": {"type": "integer"},
-                                },
-                                "values": {
-                                    "type": "object",
-                                    "description": "Field values to update",
-                                    "additionalProperties": True,
-                                },
-                            },
-                            "required": ["model", "ids", "values"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        self.register_tool(
-            Tool(
-                name="odoo_unlink",
-                description="Delete a record from an Odoo model",
-                operations=["unlink"],
-                parameters={"model": "string", "ids": "array"},
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "arguments": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Name of the Odoo model",
-                                },
-                                "ids": {
-                                    "type": "array",
-                                    "description": "Record IDs to delete",
-                                    "items": {"type": "integer"},
-                                },
-                            },
-                            "required": ["model", "ids"],
-                        }
-                    },
-                    "required": ["arguments"],
-                },
-            )
-        )
-
-        # Register prompts
-        self.register_prompt(
-            Prompt(
-                name="analyze_record",
-                description="Analyze an Odoo record",
-                template="Analyze the following Odoo record: {record}",
-                parameters={"model": "string", "id": "integer"},
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="create_record",
-                description="Create a new Odoo record",
-                template="Create a new {model} record with the following data: {data}",
-                parameters={"model": "string"},
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="update_record",
-                description="Update an existing Odoo record",
-                template="Update the {model} record with ID {id} with the following data: {data}",
-                parameters={"model": "string", "id": "integer"},
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="advanced_search",
-                description="Perform an advanced search on an Odoo model",
-                template="Search {model} records with the following criteria: {criteria}",
-                parameters={"model": "string"},
-            )
-        )
-
-        self.register_prompt(
-            Prompt(
-                name="call_method",
-                description="Call a specific method on a model or record",
-                template="Call method {method} on {model} with ID {id} and arguments: {args}",
-                parameters={
-                    "model": "string",
-                    "method": "string",
-                    "id": "integer",
-                    "args": "array",
-                    "kwargs": "object",
-                },
-            )
-        )
 
     def register_resource(self, resource: ResourceTemplate) -> None:
         """
@@ -576,7 +357,7 @@ class CapabilitiesManager:
         self.prompts[prompt.name] = prompt
         logger.info(f"Registered prompt: {prompt.name}")
 
-    def get_resource(self, name: str) -> Optional[ResourceTemplate]:
+    def get_resource(self, name: str) -> ResourceTemplate | None:
         """
         Get a resource template by name.
 
@@ -588,7 +369,7 @@ class CapabilitiesManager:
         """
         return self.resources.get(name)
 
-    def get_tool(self, name: str) -> Optional[Tool]:
+    def get_tool(self, name: str) -> Tool | None:
         """
         Get a tool by name.
 
@@ -600,30 +381,18 @@ class CapabilitiesManager:
         """
         return self.tools.get(name)
 
-    def get_prompt(self, name: str) -> Optional[Prompt]:
+    def list_resources(self) -> list[dict[str, Any]]:
         """
-        Get a prompt by name.
-
-        Args:
-            name: Name of the prompt
+        list all registered resources.
 
         Returns:
-            Optional[Prompt]: Prompt if found, None otherwise
-        """
-        return self.prompts.get(name)
-
-    def list_resources(self) -> List[Dict[str, Any]]:
-        """
-        List all registered resources.
-
-        Returns:
-            List[Dict[str, Any]]: List of resource templates as dictionaries with the following structure:
+            list[dict[str, Any]]: list of resource templates as dictionaries with the following structure:
             {
                 "name": str,
                 "type": str,
                 "description": str,
-                "operations": List[str],
-                "parameters": Optional[Dict[str, Any]],
+                "operations": list[str],
+                "parameters": dict[str, Any] | None,
                 "uri": str  # Required field for MCP client
             }
         """
@@ -639,18 +408,18 @@ class CapabilitiesManager:
             for resource in self.resources.values()
         ]
 
-    def list_tools(self) -> List[Dict[str, Any]]:
+    def list_tools(self) -> list[dict[str, Any]]:
         """
-        List all registered tools.
+        list all registered tools.
 
         Returns:
-            List[Dict[str, Any]]: List of tool objects with the following structure:
+            list[dict[str, Any]]: list of tool objects with the following structure:
             {
                 "name": str,
                 "description": str,
-                "operations": List[str],
-                "parameters": Optional[Dict[str, Any]],
-                "inputSchema": Dict[str, Any]
+                "operations": list[str],
+                "parameters": dict[str, Any] | None,
+                "inputSchema": dict[str, Any]
             }
         """
         return [
@@ -659,22 +428,23 @@ class CapabilitiesManager:
                 "description": tool.description,
                 "operations": tool.operations,
                 "parameters": tool.parameters or {},
-                "inputSchema": tool.inputSchema or {"type": "object", "properties": {}, "required": []},
+                "inputSchema": tool.inputSchema
+                or {"type": "object", "properties": {}, "required": []},
             }
             for tool in self.tools.values()
         ]
 
-    def list_prompts(self) -> List[Dict[str, Any]]:
+    def list_prompts(self) -> list[dict[str, Any]]:
         """
-        List all registered prompts.
+        list all registered prompts.
 
         Returns:
-            List[Dict[str, Any]]: List of prompt objects with the following structure:
+            list[dict[str, Any]]: list of prompt objects with the following structure:
             {
                 "name": str,
                 "description": str,
                 "template": str,
-                "parameters": Optional[Dict[str, Any]]
+                "parameters": dict[str, Any] | None
             }
         """
         return [
@@ -687,18 +457,18 @@ class CapabilitiesManager:
             for prompt in self.prompts.values()
         ]
 
-    def list_resource_templates(self) -> List[Dict[str, Any]]:
+    def list_resource_templates(self) -> list[dict[str, Any]]:
         """
-        List all registered resource templates.
+        list all registered resource templates.
 
         Returns:
-            List[Dict[str, Any]]: List of resource templates with the following structure:
+            list[dict[str, Any]]: list of resource templates with the following structure:
             {
                 "name": str,
                 "type": str,
                 "description": str,
-                "operations": List[str],
-                "parameters": Optional[Dict[str, Any]],
+                "operations": list[str],
+                "parameters": dict[str, Any] | None,
                 "uriTemplate": str
             }
         """
@@ -709,69 +479,18 @@ class CapabilitiesManager:
                 "description": resource.description,
                 "operations": resource.operations,
                 "parameters": resource.parameters or {},
-                "uriTemplate": resource.parameters.get("uri_template", f"odoo://{resource.name}"),
+                "uriTemplate": (resource.parameters or {}).get("uri_template", f"odoo://{resource.name}"),
             }
             for resource in self.resources.values()
         ]
 
-    def is_feature_enabled(self, feature: str) -> bool:
-        """
-        Check if a feature is enabled.
-
-        Args:
-            feature: Feature name
-
-        Returns:
-            bool: True if feature is enabled, False otherwise
-        """
-        return self.feature_flags.get(feature, False)
-
-    def enable_feature(self, feature: str) -> None:
-        """
-        Enable a feature.
-
-        Args:
-            feature: Feature name
-        """
-        self.feature_flags[feature] = True
-        logger.info(f"Enabled feature: {feature}")
-
-    def disable_feature(self, feature: str) -> None:
-        """
-        Disable a feature.
-
-        Args:
-            feature: Feature name
-        """
-        self.feature_flags[feature] = False
-        logger.info(f"Disabled feature: {feature}")
-
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """
         Get server capabilities following MCP 2025-03-26 specification.
-
-        Returns:
-            Dict[str, Any]: Server capabilities with the following structure:
-            {
-                "logging": {},
-                "prompts": {
-                    "listChanged": True
-                },
-                "resources": {
-                    "subscribe": True,
-                    "listChanged": True
-                },
-                "tools": {
-                    "listChanged": True
-                }
-            }
         """
         return {
-            "logging": {},  # Empty object indicates basic logging support
-            "prompts": {"listChanged": self.is_feature_enabled("prompts.listChanged")},
-            "resources": {
-                "subscribe": self.is_feature_enabled("resources.subscribe"),
-                "listChanged": self.is_feature_enabled("resources.listChanged"),
-            },
-            "tools": {"listChanged": self.is_feature_enabled("tools.listChanged")},
+            "logging": {},
+            "prompts": {"listChanged": True},
+            "resources": {"subscribe": True, "listChanged": True},
+            "tools": {"listChanged": True},
         }

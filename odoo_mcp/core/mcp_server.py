@@ -18,21 +18,17 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import aiohttp.web as web
 import yaml
 
-from odoo_mcp.core.authenticator import Authenticator
 from odoo_mcp.core.bus_handler import OdooBusHandler
 from odoo_mcp.core.capabilities_manager import (
     CapabilitiesManager,
     Prompt,
     ResourceTemplate,
-    ResourceType,
     Tool,
 )
 from odoo_mcp.core.connection_pool import ConnectionPool
 from odoo_mcp.core.handler_factory import HandlerFactory
 from odoo_mcp.core.logging_config import setup_logging, setup_logging_from_config
-from odoo_mcp.core.protocol_handler import ProtocolHandler
 from odoo_mcp.core.resource_manager import Resource, ResourceManager
-from odoo_mcp.core.session_manager import SessionManager
 from odoo_mcp.error_handling.exceptions import (
     ConfigurationError,
     OdooRecordNotFoundError,
@@ -192,11 +188,6 @@ class Server(ABC):
     @abstractmethod
     async def list_prompts(self) -> List[Prompt]:
         """List available prompts."""
-        pass
-
-    @abstractmethod
-    async def get_prompt(self, name: str, args: Dict[str, Any]) -> Any:
-        """Get a prompt by name."""
         pass
 
     @abstractmethod
@@ -384,15 +375,12 @@ class OdooMCPServer(Server):
         self.running = False
 
         # Initialize core components
-        self.protocol_handler = ProtocolHandler(PROTOCOL_VERSION)
         self.capabilities_manager = CapabilitiesManager(config)
         self.resource_manager = ResourceManager(cache_ttl=config.get("cache_ttl", 300))
 
         # Initialize Odoo components
         logger.info(f"Initializing connection pool with protocol type: {self.protocol_type}")
         self.pool = ConnectionPool(self.config, HandlerFactory.create_handler)
-        self.authenticator = Authenticator(self.config, self.pool)
-        self.session_manager = SessionManager(self.config, self.authenticator, self.pool)
         self.bus_handler = OdooBusHandler(self.config, self.pool)
         self.orm_tools = ORMTools(self.pool, self.config)
 
@@ -408,8 +396,6 @@ class OdooMCPServer(Server):
         # Register resource handlers
         self._register_resource_handlers()
 
-        # Register tools and prompts
-        self._register_tools_and_prompts()
 
     @property
     def capabilities(self) -> Dict[str, Any]:
@@ -463,179 +449,7 @@ class OdooMCPServer(Server):
                 )
         logger.info("Specific model handlers registered successfully")
 
-        # Log all registered handlers
-        logger.info("Registered handlers:")
-        for pattern, handler in self.resource_manager._resource_handlers.items():
-            handler_name = handler.__name__ if hasattr(handler, "__name__") else handler
-            logger.info(f"Pattern: {pattern}, Handler: {handler_name}")
 
-    def _register_tools_and_prompts(self) -> None:
-        """Register tools and prompts."""
-        logger.info("Registering tools and prompts...")
-        
-        def create_input_schema(parameters: Dict[str, Any]) -> Dict[str, Any]:
-            """Convert parameters dict to proper JSON Schema inputSchema format."""
-            properties = {}
-            required = []
-
-            for param_name, param_def in parameters.items():
-                # Skip 'optional' fields and other metadata
-                if param_name in ['optional', 'default']:
-                    continue
-
-                param_schema = {}
-                if 'type' in param_def:
-                    param_schema['type'] = param_def['type']
-                if 'description' in param_def:
-                    param_schema['description'] = param_def['description']
-                if 'items' in param_def:
-                    param_schema['items'] = param_def['items']
-                properties[param_name] = param_schema
-
-                # Add to required if not optional and no default
-                if not param_def.get('optional', False) and 'default' not in param_def:
-                    required.append(param_name)
-
-            return {
-                "type": "object",
-                "properties": properties,
-                "required": required
-            }
-
-        # Register resource templates
-        logger.info("Registering resource templates...")
-        templates = [
-            ResourceTemplate(
-                name="Odoo Record",
-                type=ResourceType.RECORD,
-                description="Represents a single record in an Odoo model",
-                operations=["read", "write", "delete"],
-                parameters={
-                    "uri_template": "odoo://{model}/{id}",
-                    "list_uri_template": "odoo://{model}/list",
-                    "binary_uri_template": "odoo://{model}/binary/{field}/{id}",
-                },
-            ),
-            ResourceTemplate(
-                name="Odoo Record List",
-                type=ResourceType.LIST,
-                description="Represents a list of records in an Odoo model",
-                operations=["read", "search"],
-                parameters={"uri_template": "odoo://{model}/list"},
-            ),
-            ResourceTemplate(
-                name="Odoo Binary Field",
-                type=ResourceType.BINARY,
-                description="Represents a binary field value from an Odoo record",
-                operations=["read", "write"],
-                parameters={"uri_template": "odoo://{model}/binary/{field}/{id}"},
-            ),
-        ]
-
-        for template in templates:
-            logger.info(f"Registering resource template: {template.name}")
-            self.capabilities_manager.register_resource(template)
-            logger.info(f"Resource template {template.name} registered successfully")
-
-        # Register ORM tools
-        logger.info("Registering ORM tools...")
-        
-        # Define tool parameters
-        tool_definitions = [
-            {
-                "name": "odoo_schema_version",
-                "description": "Get the current schema version using global authentication",
-                "operations": ["read"],
-                "parameters": {}
-            },
-            {
-                "name": "odoo_schema_models",
-                "description": "List accessible models using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "with_access": {"type": "boolean", "description": "Whether to filter by access rights", "default": True}
-                }
-            },
-            {
-                "name": "odoo_schema_fields",
-                "description": "Get fields for a specific model using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"}
-                }
-            },
-            {
-                "name": "odoo_search_read",
-                "description": "Search and read records with security enhancements using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "domain_json": {"type": "object", "description": "Search domain in JSON format", "optional": True},
-                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True},
-                    "limit": {"type": "integer", "description": "Maximum number of records", "default": 50},
-                    "offset": {"type": "integer", "description": "Number of records to skip", "default": 0},
-                    "order": {"type": "string", "description": "Order specification", "optional": True}
-                }
-            },
-            {
-                "name": "odoo_name_search",
-                "description": "Search records by name with security using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "name": {"type": "string", "description": "Name to search for"},
-                    "operator": {"type": "string", "description": "Search operator", "default": "ilike"},
-                    "limit": {"type": "integer", "description": "Maximum number of results", "default": 10}
-                }
-            },
-            {
-                "name": "odoo_read",
-                "description": "Read records with security using global authentication",
-                "operations": ["read"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
-                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retrieve", "optional": True}
-                }
-            },
-            {
-                "name": "odoo_create",
-                "description": "Create a record with validation and security using global authentication",
-                "operations": ["create"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "values": {"type": "object", "description": "Record values"},
-                    "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
-                }
-            },
-            {
-                "name": "odoo_write",
-                "description": "Write to records with validation and security using global authentication",
-                "operations": ["update"],
-                "parameters": {
-                    "model": {"type": "string", "description": "Model name"},
-                    "record_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of record IDs"},
-                    "values": {"type": "object", "description": "Values to write"},
-                    "operation_id": {"type": "string", "description": "Operation ID for idempotency", "optional": True}
-                }
-            }
-        ]
-
-        # Create Tool objects with proper inputSchema
-        orm_tools = []
-        for tool_def in tool_definitions:
-            orm_tools.append(Tool(
-                name=tool_def["name"],
-                description=tool_def["description"],
-                operations=tool_def["operations"],
-                parameters=tool_def["parameters"],
-                inputSchema=create_input_schema(tool_def["parameters"])
-            ))
-
-        for tool in orm_tools:
-            logger.info(f"Registering ORM tool: {tool.name}")
-            self.capabilities_manager.register_tool(tool)
-            logger.info(f"ORM tool {tool.name} registered successfully")
 
     async def _handle_odoo_record(self, uri: str, model: Optional[str] = None) -> Resource:
         """Handle Odoo record resource requests."""
@@ -808,106 +622,6 @@ class OdooMCPServer(Server):
                 raise
             raise ProtocolError(f"Error handling Odoo binary field request: {str(e)}")
 
-    async def _handle_analyze_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle analyze_record prompt."""
-        model = args["model"]
-        record_id = args["id"]
-
-        # Get record details
-        record = await self.pool.execute_kw(model=model, method="read", args=[[record_id]], kwargs={})
-        if not record:
-            raise OdooRecordNotFoundError(f"Record {record_id} not found in model {model}")
-
-        # Get field information
-        fields_info = await self.pool.execute_kw(model=model, method="fields_get", args=[], kwargs={})
-
-        return {
-            "analysis": {
-                "record": record[0],
-                "fields_info": fields_info,
-                "model": model,
-                "id": record_id,
-            }
-        }
-
-    async def _handle_create_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle create_record prompt."""
-        model = args["model"]
-        values = args["values"]
-
-        # Get field information
-        fields_info = await self.pool.execute_kw(model=model, method="fields_get", args=[], kwargs={})
-
-        # Validate required fields
-        required_fields = {name: info for name, info in fields_info.items() if info.get("required", False)}
-        missing_fields = [name for name in required_fields if name not in values]
-        if missing_fields:
-            raise ProtocolError(f"Missing required fields: {', '.join(missing_fields)}")
-
-        return {
-            "prompt": {
-                "model": model,
-                "values": values,
-                "fields_info": fields_info,
-                "required_fields": required_fields,
-            }
-        }
-
-    async def _handle_update_record_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle update_record prompt."""
-        model = args["model"]
-        record_id = args["id"]
-        values = args["values"]
-
-        # Get current record
-        record = await self.pool.execute_kw(model=model, method="read", args=[[record_id]], kwargs={})
-        if not record:
-            raise OdooRecordNotFoundError(f"Record {record_id} not found in model {model}")
-
-        # Get field information
-        fields_info = await self.pool.execute_kw(model=model, method="fields_get", args=[], kwargs={})
-
-        return {
-            "prompt": {
-                "model": model,
-                "id": record_id,
-                "current_values": record[0],
-                "new_values": values,
-                "fields_info": fields_info,
-            }
-        }
-
-    async def _handle_advanced_search_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle advanced_search prompt."""
-        model = args["model"]
-        domain = args.get("domain", [])
-
-        # Get field information
-        fields_info = await self.pool.execute_kw(model=model, method="fields_get", args=[], kwargs={})
-
-        return {"prompt": {"model": model, "domain": domain, "fields_info": fields_info}}
-
-    async def _handle_call_method_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle call-method prompt."""
-        model = args["model"]
-        method = args["method"]
-        method_args = args.get("args", [])
-        method_kwargs = args.get("kwargs", {})
-
-        # Get method information
-        methods_info = await self.pool.execute_kw(
-            model=model, method="fields_get", args=[], kwargs={"attributes": ["method"]}
-        )
-
-        return {
-            "prompt": {
-                "model": model,
-                "method": method,
-                "args": method_args,
-                "kwargs": method_kwargs,
-                "methods_info": methods_info,
-            }
-        }
 
     async def _handle_list_prompts(self, request: JsonRpcRequest) -> Dict[str, Any]:
         """Handle list_prompts request."""
@@ -1166,26 +880,6 @@ class OdooMCPServer(Server):
                 "id": request.id,
                 "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
             }
-
-    async def _handle_get_prompt(self, request: JsonRpcRequest) -> Dict[str, Any]:
-        """Handle get_prompt request."""
-        try:
-            prompt = await self.get_prompt(request.params["name"], request.params.get("args", {}))
-            # Convert ProtocolHandler response to dict
-            response = self.protocol_handler.create_response(request.id, result=prompt)
-            response = response.model_dump() if hasattr(response, "model_dump") else dict(response)
-            if "error" in response and (response["error"] is None or response["error"] == {}):
-                del response["error"]
-            return response
-        except Exception as e:
-            logger.error(f"Error handling get_prompt request: {e}")
-            error_response = self.protocol_handler.handle_protocol_error(e)
-            error_response = (
-                error_response.model_dump() if hasattr(error_response, "model_dump") else dict(error_response)
-            )
-            if "error" in error_response and (error_response["error"] is None or error_response["error"] == {}):
-                del error_response["error"]
-            return error_response
 
     async def _handle_request(self, request: Union[web.Request, Dict[str, Any]]) -> Union[web.Response, Dict[str, Any]]:
         """Handle incoming requests."""
@@ -1511,8 +1205,6 @@ class OdooMCPServer(Server):
                 return await self._handle_list_tools(jsonrpc_request)
             elif jsonrpc_request.method == "list_prompts":
                 return await self._handle_list_prompts(jsonrpc_request)
-            elif jsonrpc_request.method == "get_prompt":
-                return await self._handle_get_prompt(jsonrpc_request)
             elif jsonrpc_request.method == "list_resource_templates":
                 return await self._handle_list_resource_templates(jsonrpc_request)
             elif jsonrpc_request.method == "get_resource":
@@ -2129,15 +1821,6 @@ class OdooMCPServer(Server):
                         "result": {"content": content},
                         "id": jsonrpc_request.id,
                     }
-                elif tool_name in ["data_export", "data_import", "report_generator"]:
-                    return {
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32001,
-                            "message": f"Tool '{tool_name}' not implemented yet.",
-                        },
-                        "id": jsonrpc_request.id,
-                    }
                 else:
                     raise ProtocolError(f"Unknown tool: {tool_name}")
             else:
@@ -2310,39 +1993,6 @@ class OdooMCPServer(Server):
     async def list_prompts(self) -> List[Prompt]:
         """List available prompts."""
         return list(self.capabilities_manager.prompts.values())
-
-    async def get_prompt(self, name: str, args: Dict[str, Any]) -> Any:
-        """Get a prompt by name."""
-        try:
-            # Find the prompt in capabilities
-            prompt = next((p for p in self.capabilities_manager._prompts if p.name == name), None)
-            if not prompt:
-                raise ProtocolError(f"Prompt not found: {name}")
-
-            # Validate arguments
-            for param_name, param_info in prompt.parameters.items():
-                if param_name not in args:
-                    raise ProtocolError(f"Missing required parameter: {param_name}")
-                # TODO: Add type validation if needed
-
-            # Execute prompt based on name
-            if name == "analyze_record":
-                return await self._handle_analyze_record_prompt(args)
-            elif name == "create_record":
-                return await self._handle_create_record_prompt(args)
-            elif name == "update_record":
-                return await self._handle_update_record_prompt(args)
-            elif name == "advanced_search":
-                return await self._handle_advanced_search_prompt(args)
-            elif name == "call_method":
-                return await self._handle_call_method_prompt(args)
-            else:
-                raise ProtocolError(f"Unsupported prompt: {name}")
-
-        except Exception as e:
-            if isinstance(e, ProtocolError):
-                raise
-            raise ProtocolError(f"Error executing prompt {name}: {str(e)}")
 
     async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a JSON-RPC request."""
@@ -2523,10 +2173,15 @@ async def main(config_path: str):
 def main_cli():
     """Command line entry point."""
     parser = argparse.ArgumentParser(description="Odoo MCP Server")
-    parser.add_argument("--config", help="Path to configuration file")
+    parser.add_argument("--config", help="Path to configuration file", required=True)
     args = parser.parse_args()
 
     try:
+        # Validate config path
+        if not args.config:
+            logger.error("Configuration file path is required")
+            sys.exit(1)
+        
         # Run the async main function
         asyncio.run(main(args.config))
     except KeyboardInterrupt:

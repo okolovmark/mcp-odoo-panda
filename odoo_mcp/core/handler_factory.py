@@ -4,7 +4,7 @@ This module provides a factory pattern for creating appropriate handlers.
 """
 
 import logging
-from typing import Dict, Any, Type, Union
+from typing import Any
 
 from odoo_mcp.core.jsonrpc_handler import JSONRPCHandler
 from odoo_mcp.error_handling.exceptions import ConfigurationError
@@ -20,12 +20,12 @@ class HandlerFactory:
     configuration parameters.
     """
     
-    _handler_registry: Dict[str, Type[JSONRPCHandler]] = {
+    _handler_registry: dict[str, type[JSONRPCHandler]] = {
         "jsonrpc": JSONRPCHandler,
     }
     
     @classmethod
-    def create_handler(cls, protocol: str, config: Dict[str, Any]) -> JSONRPCHandler:
+    def create_handler(cls, protocol: str, config: dict[str, Any]) -> JSONRPCHandler:
         """
         Create a handler instance based on the protocol type.
         
@@ -59,7 +59,7 @@ class HandlerFactory:
             )
     
     @classmethod
-    def register_handler(cls, protocol: str, handler_class: Type[JSONRPCHandler]) -> None:
+    def register_handler(cls, protocol: str, handler_class: type[JSONRPCHandler]) -> None:
         """
         Register a new handler class for a protocol.
         

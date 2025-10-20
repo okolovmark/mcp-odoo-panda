@@ -5,21 +5,13 @@ This module provides connection pooling functionality for Odoo API connections.
 
 import asyncio
 import logging
-from collections import deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
-
+from typing import Any, Dict, List, Optional
+from collections.abc import Callable
 from odoo_mcp.core.jsonrpc_handler import JSONRPCHandler
 from odoo_mcp.error_handling.exceptions import (
-    AuthError,
-    ConfigurationError,
     NetworkError,
-    OdooMCPError,
-    OdooRecordNotFoundError,
-    OdooValidationError,
     PoolTimeoutError,
-    ProtocolError,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,7 +42,7 @@ class ConnectionPool:
     Manages a pool of connections to Odoo.
     """
 
-    def __init__(self, config: Dict[str, Any], handler_factory: callable):
+    def __init__(self, config: dict[str, Any], handler_factory: Callable):
         """
         Initialize the connection pool.
 
@@ -58,16 +50,14 @@ class ConnectionPool:
             config: The server configuration dictionary
             handler_factory: The handler factory function to use
         """
-        logger.info(f"Initializing connection pool with config: {config}")
-        self.config = config.copy()  # Make a copy of the config to avoid modifying the original
+        self.config = config.copy()
         self.handler_factory = handler_factory
         self.max_size = config.get("max_connections", 10)
-        self.timeout = config.get("connection_timeout", 30)
-        self.connections: List[ConnectionWrapper] = []
-        self.health_check_interval = config.get("health_check_interval", 300)  # 5 minutes
+        self.timeout = config.get("timeout", 30)
+        self.connections: list[ConnectionWrapper] = []
+        self.health_check_interval = config.get("health_check_interval", 300)
         self._lock = asyncio.Lock()
         self._cleanup_task = None
-        logger.info(f"Connection pool initialized with max_size={self.max_size}, timeout={self.timeout}")
 
     async def start(self):
         """Start the connection pool and health check task."""
@@ -112,11 +102,15 @@ class ConnectionPool:
                 if wrapper is None and len(self.connections) < self.max_size:
                     try:
                         logger.info(f"Creating new connection with config: {self.config}")
-                        handler = self.handler_factory(self.config.get("protocol", "xmlrpc"), self.config)
+                        handler = self.handler_factory(
+                            self.config.get("protocol", "xmlrpc"), self.config
+                        )
                         wrapper = ConnectionWrapper(handler)
                         self.connections.append(wrapper)
                         wrapper.in_use = True
-                        logger.info(f"Created new connection, pool size now {len(self.connections)}")
+                        logger.info(
+                            f"Created new connection, pool size now {len(self.connections)}"
+                        )
                     except Exception as e:
                         logger.error(f"Error creating new connection: {e}")
                         raise NetworkError(f"Failed to create new connection: {e}")
@@ -167,8 +161,13 @@ class ConnectionPool:
                 await asyncio.sleep(self.health_check_interval)
                 async with self._lock:
                     current_time = asyncio.get_event_loop().time()
-                    for wrapper in self.connections[:]:  # Copy list to allow modification during iteration
-                        if not wrapper.in_use and (current_time - wrapper.last_used) > self.health_check_interval:
+                    for wrapper in self.connections[
+                        :
+                    ]:  # Copy list to allow modification during iteration
+                        if (
+                            not wrapper.in_use
+                            and (current_time - wrapper.last_used) > self.health_check_interval
+                        ):
                             try:
                                 if hasattr(wrapper.connection, "close"):
                                     await wrapper.connection.close()
