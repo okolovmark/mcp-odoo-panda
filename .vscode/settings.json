@@ -12,5 +12,11 @@
     "python.analysis.inlayHints.variableTypes": true,
     "python.analysis.typeCheckingMode": "standard",
     "python.analysis.typeEvaluation.deprecateTypingAliases": true,
+    "python.analysis.exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        ".venv",
+        "venv"
+    ],
     "debugpy.showPythonInlineValues": true
 }
