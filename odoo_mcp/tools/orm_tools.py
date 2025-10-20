@@ -27,7 +27,7 @@ class ORMTools:
         self.config = config
         self.schema_introspector = SchemaIntrospector(connection_pool, config)
 
-    async def _get_global_uid(self) -> int:
+    async def _get_uid(self) -> int:
         """
         Get the global UID from the connection pool.
 
@@ -35,14 +35,7 @@ class ORMTools:
             int: Global UID for authentication
         """
         async with self.pool.get_connection() as connection:
-            if hasattr(connection, "global_uid"):
-                # XMLRPC handler
-                return connection.global_uid
-            elif hasattr(connection, "uid"):
-                # JSONRPC handler
-                return connection.uid
-            else:
-                raise Exception("No global UID found in connection")
+            return connection.uid
 
     async def schema_version(self) -> dict[str, str]:
         """
@@ -51,8 +44,8 @@ class ORMTools:
         Returns:
             Dict with version information
         """
-        global_uid = await self._get_global_uid()
-        version_info = await self.schema_introspector.get_schema_version(global_uid)
+        uid = await self._get_uid()
+        version_info = await self.schema_introspector.get_schema_version(uid)
         return {"version": version_info.version}
 
     async def schema_models(self, with_access: bool = True) -> dict[str, list[str]]:
@@ -65,8 +58,8 @@ class ORMTools:
         Returns:
             Dict with list of accessible models
         """
-        global_uid = await self._get_global_uid()
-        models = await self.schema_introspector.list_models(global_uid, with_access=with_access)
+        uid = await self._get_uid()
+        models = await self.schema_introspector.list_models(uid, with_access=with_access)
         return {"models": models}
 
     async def schema_fields(self, model: str) -> dict[str, list[dict[str, Any]]]:
@@ -79,8 +72,8 @@ class ORMTools:
         Returns:
             Dict with field information
         """
-        global_uid = await self._get_global_uid()
-        fields = await self.schema_introspector.list_fields(global_uid, model)
+        uid = await self._get_uid()
+        fields = await self.schema_introspector.list_fields(uid, model)
         fields_list = []
         for field_name, field_info in fields.items():
             fields_list.append(
@@ -191,9 +184,9 @@ class ORMTools:
         Returns:
             Dict with creation result
         """
-        global_uid = await self._get_global_uid()
+        uid = await self._get_uid()
         # Validate required fields
-        fields_info = await self.schema_introspector.list_fields(global_uid, model)
+        fields_info = await self.schema_introspector.list_fields(uid, model)
         missing_fields = []
         for field_name, field_info in fields_info.items():
             if field_info.required and field_name not in values:

@@ -13,10 +13,11 @@
     "python.analysis.typeCheckingMode": "standard",
     "python.analysis.typeEvaluation.deprecateTypingAliases": true,
     "python.analysis.exclude": [
-        "**/node_modules",
         "**/__pycache__",
         ".venv",
-        "venv"
+    ],
+    "python.analysis.include": [
+        "odoo_mcp",
     ],
     "debugpy.showPythonInlineValues": true
 }

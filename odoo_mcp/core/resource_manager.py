@@ -11,7 +11,6 @@ import asyncio
 from datetime import datetime, timedelta
 
 from odoo_mcp.error_handling.exceptions import ProtocolError
-from odoo_mcp.performance.caching import get_cache_manager, CACHE_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,6 @@ class ResourceManager:
         self._resource_handlers: Dict[str, Callable] = {}
         self._subscribers: Dict[str, Set[Callable]] = {}
         self._resource_cache: Dict[str, Resource] = {}
-        self._cache_manager = get_cache_manager()
 
     def register_resource_handler(self, uri_pattern: str, handler: Callable) -> None:
         """
@@ -117,8 +115,7 @@ class ResourceManager:
             ProtocolError: If the resource is not found or cannot be accessed
         """
         # Check cache first
-        if uri in self._resource_cache:
-            cached = self._resource_cache[uri]
+        if cached := self._resource_cache.get(uri):
             if cached.last_modified and datetime.now() - cached.last_modified < timedelta(seconds=self._cache_ttl):
                 return cached.to_dict()
 
@@ -227,8 +224,3 @@ class ResourceManager:
                     await callback(uri, resource)
                 except Exception as e:
                     logger.error(f"Error notifying subscriber for {uri}: {e}")
-
-    def clear_cache(self) -> None:
-        """Clear the resource cache."""
-        self._resource_cache.clear()
-        logger.info("Resource cache cleared")

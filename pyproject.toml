@@ -44,6 +44,7 @@ dependencies = [
     "python-json-logger>=2.0.0",
     "structlog>=23.0.0",
     "tenacity>=8.0.0",
+    "OdooRPC==0.10.1"
 ]
 
 # Optional dependencies

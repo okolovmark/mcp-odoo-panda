@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 
-from odoo_mcp.core.base_handler import BaseOdooHandler
+from odoo_mcp.core.jsonrpc_handler import JSONRPCHandler
 from odoo_mcp.error_handling.exceptions import (
     AuthError,
     ConfigurationError,
@@ -30,7 +30,7 @@ class ConnectionWrapper:
     Wrapper for a connection that manages its lifecycle and usage state.
     """
 
-    def __init__(self, connection: BaseOdooHandler):
+    def __init__(self, connection: JSONRPCHandler):
         self.connection = connection
         self.in_use = False
         self.last_used = asyncio.get_event_loop().time()
@@ -91,7 +91,7 @@ class ConnectionPool:
         Get a connection from the pool or create a new one if needed.
 
         Yields:
-            BaseOdooHandler: A connection handler
+            JSONRPCHandler: A connection handler
 
         Raises:
             PoolTimeoutError: If no connection is available within the timeout
@@ -136,7 +136,7 @@ class ConnectionPool:
                     wrapper.in_use = False
                     wrapper.last_used = asyncio.get_event_loop().time()
 
-    async def release_connection(self, connection: BaseOdooHandler):
+    async def release_connection(self, connection: JSONRPCHandler):
         """
         Release a connection back to the pool.
 

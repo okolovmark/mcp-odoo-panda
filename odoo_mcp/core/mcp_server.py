@@ -13,7 +13,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import aiohttp.web as web
 import yaml
@@ -38,7 +38,6 @@ from odoo_mcp.error_handling.exceptions import (
     OdooRecordNotFoundError,
     ProtocolError,
 )
-from odoo_mcp.performance.caching import initialize_cache_manager
 from odoo_mcp.tools.orm_tools import ORMTools
 
 # Constants
@@ -2429,11 +2428,6 @@ class OdooMCPServer(Server):
                 logger.info("Stopping bus handler...")
                 await self.bus_handler.stop()
 
-            # Clear the cache
-            if hasattr(self, "resource_manager"):
-                logger.info("Clearing resource cache...")
-                self.resource_manager.clear_cache()
-
             logger.info("Server stopped successfully")
 
         except Exception as e:
@@ -2455,7 +2449,7 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
-async def main(config_path: str = "odoo_mcp/config/config.dev.yaml"):
+async def main(config_path: str):
     """Main entry point for the server."""
     try:
         # Setup basic logging first
@@ -2490,17 +2484,6 @@ async def main(config_path: str = "odoo_mcp/config/config.dev.yaml"):
                 logger.info(f"Logging configured with level: {config.get('log_level', 'INFO')}")
         except Exception as e:
             logger.error(f"Failed to setup logging: {e}")
-            raise
-
-        # Initialize cache manager first
-        logger.info("Initializing cache manager...")
-        try:
-            cache_config = config.get("cache", {})
-            logger.info(f"Cache configuration: {cache_config}")
-            initialize_cache_manager(config)
-            logger.info("Cache manager initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize cache manager: {e}")
             raise
 
         # Create server instance
@@ -2540,7 +2523,7 @@ async def main(config_path: str = "odoo_mcp/config/config.dev.yaml"):
 def main_cli():
     """Command line entry point."""
     parser = argparse.ArgumentParser(description="Odoo MCP Server")
-    parser.add_argument("--config", default="odoo_mcp/config/config.json", help="Path to configuration file")
+    parser.add_argument("--config", help="Path to configuration file")
     args = parser.parse_args()
 
     try:

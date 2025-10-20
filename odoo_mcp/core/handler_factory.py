@@ -6,8 +6,6 @@ This module provides a factory pattern for creating appropriate handlers.
 import logging
 from typing import Dict, Any, Type, Union
 
-from odoo_mcp.core.base_handler import BaseOdooHandler
-from odoo_mcp.core.xmlrpc_handler import XMLRPCHandler
 from odoo_mcp.core.jsonrpc_handler import JSONRPCHandler
 from odoo_mcp.error_handling.exceptions import ConfigurationError
 
@@ -22,13 +20,12 @@ class HandlerFactory:
     configuration parameters.
     """
     
-    _handler_registry: Dict[str, Type[BaseOdooHandler]] = {
-        "xmlrpc": XMLRPCHandler,
+    _handler_registry: Dict[str, Type[JSONRPCHandler]] = {
         "jsonrpc": JSONRPCHandler,
     }
     
     @classmethod
-    def create_handler(cls, protocol: str, config: Dict[str, Any]) -> BaseOdooHandler:
+    def create_handler(cls, protocol: str, config: Dict[str, Any]) -> JSONRPCHandler:
         """
         Create a handler instance based on the protocol type.
         
@@ -37,7 +34,7 @@ class HandlerFactory:
             config: Configuration dictionary
             
         Returns:
-            BaseOdooHandler: Appropriate handler instance
+            JSONRPCHandler: Appropriate handler instance
             
         Raises:
             ConfigurationError: If protocol is not supported
@@ -62,17 +59,17 @@ class HandlerFactory:
             )
     
     @classmethod
-    def register_handler(cls, protocol: str, handler_class: Type[BaseOdooHandler]) -> None:
+    def register_handler(cls, protocol: str, handler_class: Type[JSONRPCHandler]) -> None:
         """
         Register a new handler class for a protocol.
         
         Args:
             protocol: Protocol name
-            handler_class: Handler class that extends BaseOdooHandler
+            handler_class: Handler class that extends JSONRPCHandler
         """
-        if not issubclass(handler_class, BaseOdooHandler):
+        if not issubclass(handler_class, JSONRPCHandler):
             raise ValueError(
-                f"Handler class {handler_class.__name__} must extend BaseOdooHandler"
+                f"Handler class {handler_class.__name__} must extend JSONRPCHandler"
             )
         
         cls._handler_registry[protocol.lower()] = handler_class

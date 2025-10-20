@@ -4,5 +4,7 @@
   "odoo_url": "http://localhost:16069",
   "database": "develop",
   "username": "admin",
-  "api_key": "admin"
+  "password": "admin",
+
+  "timeout": 30
 }
